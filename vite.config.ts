@@ -2,11 +2,16 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
+import packageJson from "./package.json" with { type: "json" };
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [vue()],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version),
+    __TAURI_ENV_PLATFORM__: JSON.stringify(process.env.TAURI_ENV_PLATFORM ?? ""),
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

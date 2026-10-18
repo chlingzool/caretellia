@@ -15,7 +15,7 @@ import type { PostcardData } from "./types/postcard";
 import "./postcard-display.css";
 
 const emit = defineEmits<{ (event: "back"): void }>();
-const props = defineProps<{ recentViewLimit: number }>();
+const props = defineProps<{ recentViewLimit: number; initialFilePath?: string }>();
 
 const history = ref<PostcardData[]>([]);
 const recentFiles = ref<ViewedFile[]>([]);
@@ -150,6 +150,16 @@ function fileNameFromPath(path: string): string {
   return segments[segments.length - 1] ?? "letter.clc";
 }
 
+async function openLocalFile(path: string) {
+  try {
+    const bytes = Uint8Array.from(await invoke<number[]>("read_clc_file", { filePath: path }));
+    await rememberAndView(bytes, fileNameFromPath(path), path);
+  } catch (error) {
+    console.error("Unable to open local CLC file:", error);
+    errorMessage.value = t(`无法打开 CLC 文件：${error instanceof Error ? error.message : String(error)}`, `Could not open CLC file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function chooseLocalFile() {
   errorMessage.value = "";
   if ("__TAURI_INTERNALS__" in window) {
@@ -160,8 +170,7 @@ async function chooseLocalFile() {
         filters: [{ name: "Caretellia Letter Config", extensions: ["clc"] }],
       });
       if (typeof path !== "string") return;
-      const bytes = Uint8Array.from(await invoke<number[]>("read_clc_file", { filePath: path }));
-      await rememberAndView(bytes, fileNameFromPath(path), path);
+      await openLocalFile(path);
     } catch (error) {
       console.error("Unable to open local CLC file:", error);
       errorMessage.value = t(`无法打开 CLC 文件：${error instanceof Error ? error.message : String(error)}`, `Could not open CLC file: ${error instanceof Error ? error.message : String(error)}`);
@@ -220,7 +229,10 @@ function togglePostcard() {
   isPostcardFlipped.value = !isPostcardFlipped.value;
 }
 
-onMounted(() => void refreshLists());
+onMounted(async () => {
+  await refreshLists();
+  if (props.initialFilePath) await openLocalFile(props.initialFilePath);
+});
 </script>
 
 <template>

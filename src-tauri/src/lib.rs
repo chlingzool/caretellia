@@ -1,6 +1,61 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod commands;
 
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::{Emitter, Manager};
+
+const CLC_OPEN_EVENT: &str = "caretellia-open-clc";
+static NEXT_CLC_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClcOpenRequest {
+    id: u64,
+    path: String,
+}
+
+impl ClcOpenRequest {
+    fn from_path(path: PathBuf) -> Option<Self> {
+        let is_clc = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("clc"));
+        is_clc.then(|| Self {
+            id: NEXT_CLC_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+            path: path.to_string_lossy().into_owned(),
+        })
+    }
+}
+
+struct PendingClcFiles(std::sync::Mutex<VecDeque<ClcOpenRequest>>);
+
+fn initial_clc_files() -> VecDeque<ClcOpenRequest> {
+    std::env::args_os()
+        .skip(1)
+        .filter_map(|argument| ClcOpenRequest::from_path(PathBuf::from(argument)))
+        .collect()
+}
+
+fn enqueue_clc_file(app: &tauri::AppHandle, request: ClcOpenRequest) {
+    match app.state::<PendingClcFiles>().0.lock() {
+        Ok(mut pending) => pending.push_back(request.clone()),
+        Err(error) => eprintln!("Unable to queue opened CLC file: {error}"),
+    }
+    if let Err(error) = app.emit(CLC_OPEN_EVENT, request) {
+        eprintln!("Unable to notify the app about an opened CLC file: {error}");
+    }
+}
+
+#[tauri::command]
+fn take_initial_clc_files(
+    state: tauri::State<'_, PendingClcFiles>,
+) -> Result<Vec<ClcOpenRequest>, String> {
+    let mut pending = state.0.lock().map_err(|error| error.to_string())?;
+    Ok(pending.drain(..).collect())
+}
+
 #[tauri::command]
 fn save_postcard(
     file_name: String,
@@ -154,10 +209,31 @@ fn local_clc_file_exists(file_path: String) -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
+        .manage(PendingClcFiles(std::sync::Mutex::new(initial_clc_files())));
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        if let Some(request) = argv
+            .into_iter()
+            .skip(1)
+            .find_map(|argument| ClcOpenRequest::from_path(PathBuf::from(argument)))
+        {
+            enqueue_clc_file(app, request);
+        }
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init());
+
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    let app = builder
         .invoke_handler(tauri::generate_handler![
+            take_initial_clc_files,
             save_postcard,
             save_postcard_binary,
             save_postcard_binary_to_path,
@@ -166,6 +242,22 @@ pub fn run() {
             local_clc_file_exists,
             commands::fonts::get_system_fonts,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+        if let tauri::RunEvent::Opened { urls } = event {
+            for request in urls
+                .into_iter()
+                .filter_map(|url| url.to_file_path().ok())
+                .filter_map(ClcOpenRequest::from_path)
+            {
+                enqueue_clc_file(app_handle, request);
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+        let _ = (app_handle, event);
+    });
 }
