@@ -133,10 +133,11 @@ fn get_fonts_macos() -> Result<Vec<FontInfo>, String> {
 // ==================== Linux ====================
 #[cfg(target_os = "linux")]
 fn get_fonts_linux() -> Result<Vec<FontInfo>, String> {
+    use fontconfig_sys::constants::{FC_FAMILY, FC_STYLE};
     use fontconfig_sys::{
         FcConfigGetCurrent, FcFontList, FcFontSet, FcFontSetDestroy, FcObjectSet, FcObjectSetAdd,
         FcObjectSetCreate, FcObjectSetDestroy, FcPattern, FcPatternCreate, FcPatternDestroy,
-        FcPatternGetString, FcResultMatch, FC_FAMILY, FC_STYLE,
+        FcPatternGetString, FcResultMatch,
     };
     use std::ffi::CStr;
     use std::ptr;

@@ -1,28 +1,38 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import postcardEditor from "./postcard-editor.vue";
 import TemplateGallery from "./TemplateGallery.vue";
 import SettingsPage from "./SettingsPage.vue";
 import ThanksMenu from "./ThanksMenu.vue";
+import EnvelopeViewer from "./EnvelopeViewer.vue";
 import { locale, setLocale, syncSystemLocale, t } from "./i18n";
-import type { AppSettings, LetterTemplate } from "./types/postcard";
+import { decodeClc, MAX_CLC_FILE_SIZE } from "./clc";
+import { deleteHistoryCard as removeHistoryCard, listHistory, saveHistoryCard } from "./letterHistory";
+import type { AppSettings, LetterTemplate, PostcardData } from "./types/postcard";
 
 type Screen =
   | { kind: "home" }
   | { kind: "editor"; entry: "new" | "history" | "template"; sessionId: string; cardId?: string; template?: LetterTemplate }
   | { kind: "history" }
+  | { kind: "viewer" }
   | { kind: "templates" }
   | { kind: "settings" };
 
 const screens = ref<Screen[]>([{ kind: "home" }]);
-const historyVersion = ref(0);
+const historyCards = ref<PostcardData[]>([]);
+const historyLoading = ref(false);
 const historyError = ref("");
+const historyStatus = ref("");
+const clcImportInput = ref<HTMLInputElement | null>(null);
 const historyDetailsId = ref<string | null>(null);
 const settingsError = ref("");
 const exportDirectoryError = ref("");
 const showThanks = ref(false);
+const mobileMenuOpen = ref(false);
 const thanksButton = ref<HTMLButtonElement | null>(null);
+const mobileMenuButton = ref<HTMLButtonElement | null>(null);
+const mobileMenuRoot = ref<HTMLElement | null>(null);
 const settings: AppSettings = reactive(readSettings());
 setLocale(settings.locale);
 const theme = ref<"light" | "dark">(
@@ -38,17 +48,18 @@ watch(theme, (nextTheme) => {
 
 const currentScreen = computed(() => screens.value[screens.value.length - 1]);
 
-const historyCards = computed(() => {
-  historyVersion.value;
+async function refreshHistory() {
+  historyLoading.value = true;
   try {
-    const raw = localStorage.getItem("caretellia-postcards");
-    if (!raw) return [];
-    const cards = JSON.parse(raw);
-    return Array.isArray(cards) ? cards : [];
-  } catch {
-    return [];
+    historyCards.value = await listHistory();
+    historyError.value = "";
+  } catch (error) {
+    console.error("Unable to load saved letters:", error);
+    historyError.value = t("无法读取本机历史信件，请检查存储权限或空间。", "Could not read local letters. Check storage permissions and available space.");
+  } finally {
+    historyLoading.value = false;
   }
-});
+}
 
 const savedCount = computed(() => historyCards.value.length);
 
@@ -64,16 +75,13 @@ const exportData = ref<{
   fontSize: number;
 } | null>(null);
 
-function refreshHistory() {
-  historyVersion.value += 1;
-}
-
 function readSettings(): AppSettings {
   const defaults: AppSettings = {
     uiFont: "'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif",
     uiFontSize: 14,
     exportDirectory: "",
     exportColorMode: "system",
+    recentViewedLimit: 10,
     locale: "system",
   };
   try {
@@ -87,6 +95,9 @@ function readSettings(): AppSettings {
       exportColorMode: parsed.exportColorMode === "light" || parsed.exportColorMode === "dark"
         ? parsed.exportColorMode
         : "system",
+      recentViewedLimit: Number.isInteger(parsed.recentViewedLimit)
+        ? Math.min(30, Math.max(5, parsed.recentViewedLimit))
+        : defaults.recentViewedLimit,
       locale: parsed.locale === "en" || parsed.locale === "zh" ? parsed.locale : "system",
     };
   } catch (error) {
@@ -118,17 +129,41 @@ function openHistoryScreen() {
   navigate({ kind: "history" });
 }
 
+function openEnvelopeViewer() {
+  navigate({ kind: "viewer" });
+}
+
 function openTemplateGallery() {
   navigate({ kind: "templates" });
 }
 
 function openSettings() {
+  mobileMenuOpen.value = false;
   navigate({ kind: "settings" });
+}
+
+function openThanks() {
+  mobileMenuOpen.value = false;
+  showThanks.value = true;
 }
 
 function closeThanks() {
   showThanks.value = false;
-  void nextTick(() => thanksButton.value?.focus());
+  void nextTick(() => {
+    const isMobile = window.matchMedia("(max-width: 680px)").matches;
+    const trigger = isMobile ? mobileMenuButton.value : thanksButton.value;
+    trigger?.focus();
+  });
+}
+
+function handleMobileMenuKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") mobileMenuOpen.value = false;
+}
+
+function handleOutsideMenuClick(event: PointerEvent) {
+  if (event.target instanceof Node && !mobileMenuRoot.value?.contains(event.target)) {
+    mobileMenuOpen.value = false;
+  }
 }
 
 function openTemplateEditor(template: LetterTemplate) {
@@ -147,22 +182,43 @@ function openHistoryCard(cardId: string) {
   navigate({ kind: "editor", entry: "history", sessionId: crypto.randomUUID(), cardId });
 }
 
-function deleteHistoryCard(cardId: string) {
-  if (!window.confirm(t("确定删除这封信件吗？此操作无法撤销。", "Delete this letter? This action cannot be undone."))) return;
-
+async function deleteHistoryCard(cardId: string) {
   try {
-    const raw = localStorage.getItem("caretellia-postcards");
-    const cards = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(cards)) {
-      throw new Error("历史信件数据格式无效");
-    }
-    const remainingCards = cards.filter((card) => card.id !== cardId);
-    localStorage.setItem("caretellia-postcards", JSON.stringify(remainingCards));
+    const message = t("确定删除这封信件吗？此操作无法撤销。", "Delete this letter? This action cannot be undone.");
+    const confirmed = "__TAURI_INTERNALS__" in window
+      ? await confirmDialog(message, { title: t("删除信件", "Delete letter"), kind: "warning" })
+      : window.confirm(message);
+    if (!confirmed) return;
+
+    await removeHistoryCard(cardId);
     historyError.value = "";
-    window.dispatchEvent(new CustomEvent("caretellia-history-changed"));
+    historyStatus.value = "";
+    await refreshHistory();
   } catch (error) {
     console.error("Unable to delete saved letter:", error);
     historyError.value = t("删除失败，请检查本机存储空间后重试。", "Could not delete the letter. Check local storage and try again.");
+  }
+}
+
+async function importClc(event: Event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  try {
+    if (file.size > MAX_CLC_FILE_SIZE) throw new Error("CLC 文件超过允许的大小限制");
+    const card = await decodeClc(await file.arrayBuffer());
+    await saveHistoryCard(card);
+    historyCards.value = await listHistory();
+    historyError.value = "";
+    historyStatus.value = t(`已导入“${card.title || "未命名"}”。`, `Imported "${card.title || "Untitled"}".`);
+    window.dispatchEvent(new CustomEvent("caretellia-history-changed"));
+  } catch (error) {
+    console.error("Unable to import CLC letter:", error);
+    const reason = error instanceof Error ? error.message : String(error);
+    historyStatus.value = "";
+    historyError.value = t(`导入失败：${reason}`, `Import failed: ${reason}`);
   }
 }
 
@@ -201,23 +257,29 @@ function handleExport(data: any) {
   showExport.value = true;
 }
 
+const handleStorageUpdate = () => refreshHistory();
+
 onMounted(() => {
-  refreshHistory();
-  const handleStorageUpdate = () => refreshHistory();
+  void refreshHistory();
+  document.addEventListener("keydown", handleMobileMenuKeydown);
+  document.addEventListener("pointerdown", handleOutsideMenuClick);
   window.addEventListener("languagechange", syncSystemLocale);
   window.addEventListener("storage", handleStorageUpdate);
   window.addEventListener("caretellia-history-changed", handleStorageUpdate);
-  onBeforeUnmount(() => {
-    window.removeEventListener("languagechange", syncSystemLocale);
-    window.removeEventListener("storage", handleStorageUpdate);
-    window.removeEventListener("caretellia-history-changed", handleStorageUpdate);
-  });
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", handleMobileMenuKeydown);
+  document.removeEventListener("pointerdown", handleOutsideMenuClick);
+  window.removeEventListener("languagechange", syncSystemLocale);
+  window.removeEventListener("storage", handleStorageUpdate);
+  window.removeEventListener("caretellia-history-changed", handleStorageUpdate);
 });
 </script>
 
 <template>
   <div class="app-shell" :data-theme="theme" :style="{ '--ui-font-family': settings.uiFont, '--ui-font-size': `${settings.uiFontSize}px` }">
-    <header class="app-bar">
+    <header ref="mobileMenuRoot" class="app-bar">
       <button class="brand" type="button" :aria-label="t('回到首页', 'Go to home')" @click="goHome">
         <span class="brand-mark" aria-hidden="true">✉</span>
         <span class="brand-name">Caretellia</span>
@@ -225,19 +287,41 @@ onMounted(() => {
         <span class="brand-product">{{ t("明信片工作室", "Postcard Studio") }}</span>
       </button>
       <div class="app-actions">
-      <button ref="thanksButton" class="thanks-toggle" type="button" :aria-expanded="showThanks" aria-haspopup="dialog" @click="showThanks = true">
+      <button ref="thanksButton" class="thanks-toggle desktop-header-action" type="button" :aria-expanded="showThanks" aria-haspopup="dialog" @click="openThanks">
         <span aria-hidden="true">♥</span>
         <span>{{ t("感谢", "Thanks") }}</span>
       </button>
-      <button class="theme-toggle" type="button" :aria-label="t('打开设置', 'Open settings')" @click="openSettings">
+      <button class="theme-toggle settings-toggle desktop-header-action" type="button" :aria-label="t('打开设置', 'Open settings')" @click="openSettings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>
         <span>{{ t("设置", "Settings") }}</span>
       </button>
-      <button class="theme-toggle" type="button" :aria-label="theme === 'light' ? t('切换到深色模式', 'Switch to dark mode') : t('切换到浅色模式', 'Switch to light mode')" @click="toggleTheme">
+      <button class="theme-toggle theme-mode-toggle" type="button" :aria-label="theme === 'light' ? t('切换到深色模式', 'Switch to dark mode') : t('切换到浅色模式', 'Switch to light mode')" @click="toggleTheme">
         <svg v-if="theme === 'light'" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.5 8.5 0 1 0 20.2 15.4Z" /></svg>
         <svg v-else viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
         <span>{{ theme === 'light' ? t("深色模式", "Dark mode") : t("浅色模式", "Light mode") }}</span>
       </button>
+      <div class="mobile-menu-wrap">
+        <button
+          ref="mobileMenuButton"
+          class="mobile-menu-toggle"
+          type="button"
+          :aria-label="mobileMenuOpen ? t('关闭菜单', 'Close menu') : t('打开菜单', 'Open menu')"
+          aria-controls="mobile-app-menu"
+          :aria-expanded="mobileMenuOpen"
+          @click="mobileMenuOpen = !mobileMenuOpen"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
+        <nav v-if="mobileMenuOpen" id="mobile-app-menu" class="mobile-app-menu" :aria-label="t('应用菜单', 'App menu')">
+          <button class="mobile-menu-thanks" type="button" @click="openThanks">
+            <span aria-hidden="true">♥</span>{{ t("感谢", "Thanks") }}
+          </button>
+          <button type="button" @click="openSettings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>
+            {{ t("设置", "Settings") }}
+          </button>
+        </nav>
+      </div>
       </div>
     </header>
 
@@ -291,10 +375,28 @@ onMounted(() => {
             </span>
             <span class="card-arrow" aria-hidden="true">→</span>
           </button>
+
+          <button class="home-card" type="button" @click="openEnvelopeViewer">
+            <span class="card-icon archive-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 8 12 3l9 5-9 5-9-5Z" /><path d="M3 8v9l9 5 9-5V8M12 13v9" /></svg>
+            </span>
+            <span class="home-card-copy">
+              <span class="home-card-label">{{ t("浏览信件内容", "Browse your letters") }}</span>
+              <strong>{{ t("查看信封", "View letters") }}</strong>
+              <small>{{ t("查看历史信件或打开本地 CLC 文件，不会自动保存导入内容。", "View saved letters or open local CLC files without adding imports to saved history.") }}</small>
+            </span>
+            <span class="card-arrow" aria-hidden="true">→</span>
+          </button>
         </section>
 
         <p class="home-footnote"><span class="status-dot"></span> {{ t("所有内容只保存在这台设备上", "Everything is stored on this device only") }}</p>
       </template>
+
+      <EnvelopeViewer
+        v-else-if="currentScreen.kind === 'viewer'"
+        :recent-view-limit="settings.recentViewedLimit"
+        @back="goBack"
+      />
 
       <template v-else-if="currentScreen.kind === 'history'">
         <div class="command-bar">
@@ -303,6 +405,8 @@ onMounted(() => {
           <span class="command-divider"></span>
           <span class="command-context">{{ t("历史信件", "Letter history") }}</span>
           <div class="toolbar-segment right">
+            <input ref="clcImportInput" type="file" accept=".clc,application/octet-stream" hidden @change="importClc" />
+            <button class="toolbar-btn" type="button" @click="clcImportInput?.click()">{{ t("导入 CLC", "Import CLC") }}</button>
             <button class="toolbar-btn primary-command" type="button" @click="openNewEditor"><span aria-hidden="true">＋</span> {{ t("新建信件", "New letter") }}</button>
           </div>
         </div>
@@ -317,8 +421,12 @@ onMounted(() => {
         </section>
 
         <p v-if="historyError" class="history-error" role="alert">{{ historyError }}</p>
+        <p v-if="historyStatus" class="history-success" role="status">{{ historyStatus }}</p>
         <section class="panel-shell">
-          <div v-if="historyCards.length === 0" class="empty-state">
+          <div v-if="historyLoading && historyCards.length === 0" class="empty-state" role="status">
+            <strong>{{ t("正在读取历史信件…", "Loading letter history…") }}</strong>
+          </div>
+          <div v-else-if="historyCards.length === 0" class="empty-state">
             <span class="empty-icon" aria-hidden="true">✉</span>
             <strong>{{ t("这里还没有信件", "No letters yet") }}</strong>
             <span>{{ t("创建并保存第一封信，它会出现在这里。", "Create and save your first letter to see it here.") }}</span>
@@ -467,9 +575,14 @@ onMounted(() => {
 }
 
 .app-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.mobile-menu-wrap {
+  display: none;
 }
 
 .thanks-toggle {
@@ -1069,6 +1182,12 @@ onMounted(() => {
   font-size: 0.9286em;
 }
 
+.history-success {
+  margin: 0 0 12px;
+  color: var(--success);
+  font-size: 0.9286em;
+}
+
 .history-actions {
   display: flex;
   gap: 8px;
@@ -1082,6 +1201,8 @@ onMounted(() => {
 
 @media (max-width: 680px) {
   .app-bar {
+    position: relative;
+    z-index: 20;
     height: 52px;
     padding: 0 16px;
   }
@@ -1091,13 +1212,112 @@ onMounted(() => {
     display: none;
   }
 
-  .theme-toggle {
-    gap: 5px;
+  .app-actions {
+    gap: 6px;
+  }
+
+  .desktop-header-action {
+    display: none;
+  }
+
+  .theme-mode-toggle {
+    gap: 0;
     padding: 7px;
   }
 
-  .app-actions .theme-toggle span {
+  .theme-mode-toggle span {
     display: none;
+  }
+
+  .mobile-menu-wrap {
+    position: relative;
+    display: block;
+  }
+
+  .mobile-menu-toggle {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 7px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .mobile-menu-toggle:hover,
+  .mobile-menu-toggle[aria-expanded="true"] {
+    border-color: var(--accent);
+    background: var(--surface-hover);
+  }
+
+  .mobile-menu-toggle:focus-visible,
+  .mobile-app-menu button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .mobile-menu-toggle svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+  }
+
+  .mobile-app-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 30;
+    display: grid;
+    gap: 4px;
+    width: min(220px, calc(100vw - 32px));
+    padding: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 12px 28px rgb(0 0 0 / 18%);
+  }
+
+  .mobile-app-menu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .mobile-app-menu button:hover {
+    border-color: var(--border);
+    background: var(--surface-hover);
+  }
+
+  .mobile-app-menu button svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .mobile-app-menu .mobile-menu-thanks {
+    color: #98464b;
+  }
+
+  .app-shell[data-theme="dark"] .mobile-app-menu .mobile-menu-thanks {
+    color: #edb2b3;
   }
 
   .thanks-toggle {
@@ -1130,10 +1350,6 @@ onMounted(() => {
 
   .history-details {
     padding: 12px;
-  }
-
-  .history-open {
-    display: none;
   }
 
   .history-actions {

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, onDeactivated, nextTick, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import FontSelect from "./components/FontSelect.vue";
 import { DEFAULT_FONT_FAMILIES, SYSTEM_DEFAULT_FONT, useSystemFonts } from "./composables/useSystemFonts";
 import { locale, t } from "./i18n";
+import { encodeClc } from "./clc";
+import { listHistory, saveHistoryCard } from "./letterHistory";
 import type { LetterSticker, LetterTemplate, PostcardData } from "./types/postcard";
 import postcardDisplayStyles from "./postcard-display.css?inline";
 import "./postcard-display.css";
@@ -65,6 +68,10 @@ const backCaptionEditor = ref<HTMLElement | null>(null);
 const activeRichEditor = ref<HTMLElement | null>(null);
 const activeRichFormats = ref({ bold: false, italic: false, underline: false, unorderedList: false, orderedList: false });
 const letterCanvas = ref<HTMLElement | null>(null);
+const historyError = ref("");
+const exportError = ref("");
+const exportMenuOpen = ref(false);
+const exportBusy = ref(false);
 const selectedStickerId = ref<string | null>(null);
 type StickerInteraction = {
   kind: "move" | "resize" | "rotate";
@@ -321,12 +328,13 @@ function clearStampImage() {
   form.stampImage = "";
 }
 
-function loadHistory() {
+async function loadHistory() {
   try {
-    const raw = localStorage.getItem("caretellia-postcards");
-    if (raw) savedCards.value = JSON.parse(raw);
-  } catch {
-    savedCards.value = [];
+    savedCards.value = await listHistory();
+    historyError.value = "";
+  } catch (error) {
+    console.error("Unable to load saved letters:", error);
+    historyError.value = t("无法读取本机历史信件，请检查存储权限或空间。", "Could not read local letters. Check storage permissions and available space.");
   }
 }
 
@@ -334,11 +342,11 @@ function notifyHistoryChange() {
   window.dispatchEvent(new CustomEvent("caretellia-history-changed"));
 }
 
-function saveToStorage() {
-  const all = savedCards.value.filter((c) => c.id !== form.id);
-  all.unshift({ ...form, note: form.note ?? "" });
-  localStorage.setItem("caretellia-postcards", JSON.stringify(all.slice(0, 20)));
-  savedCards.value = all;
+async function saveToStorage() {
+  const card = { ...form, note: form.note ?? "" };
+  await saveHistoryCard(card);
+  savedCards.value = await listHistory();
+  historyError.value = "";
   notifyHistoryChange();
 }
 
@@ -455,9 +463,14 @@ function adjustPreviewWidth(event: KeyboardEvent) {
   }
 }
 
-function handleSave() {
-  saveToStorage();
-  emit("save", { ...form });
+async function handleSave() {
+  try {
+    await saveToStorage();
+    emit("save", { ...form });
+  } catch (error) {
+    console.error("Unable to save letter:", error);
+    historyError.value = t("保存失败，请检查本机存储空间后重试。", "Could not save the letter. Check local storage and try again.");
+  }
 }
 
 function esc(s: string) {
@@ -669,32 +682,145 @@ ${script}
 </html>`;
 }
 
-const exportBusy = ref(false);
+function downloadFile(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportClc() {
+  exportMenuOpen.value = false;
+  exportBusy.value = true;
+  exportError.value = "";
+  const fileName = `postcard-${form.id.slice(0, 8)}.clc`;
+  try {
+    const bytes = await encodeClc({ ...form, note: form.note ?? "" });
+    try {
+      await invoke("save_postcard_binary", {
+        fileName,
+        content: Array.from(bytes),
+        exportDirectory: props.exportDirectory || null,
+      });
+    } catch (error) {
+      console.error("Unable to save CLC through the native file writer; using browser download:", error);
+      const downloadBytes = new Uint8Array(bytes.byteLength);
+      downloadBytes.set(bytes);
+      downloadFile(new Blob([downloadBytes.buffer], { type: "application/octet-stream" }), fileName);
+    }
+    emit("export", { ...form });
+  } catch (error) {
+    console.error("CLC export failed:", error);
+    exportError.value = t("CLC 导出失败，请检查信件内容后重试。", "CLC export failed. Check the letter content and try again.");
+  } finally {
+    exportBusy.value = false;
+  }
+}
+
+async function saveClcAs() {
+  exportMenuOpen.value = false;
+  exportBusy.value = true;
+  exportError.value = "";
+  const baseFileName = `postcard-${form.id.slice(0, 8)}`;
+  const clcFileName = `${baseFileName}.clc`;
+  try {
+    if ("__TAURI_INTERNALS__" in window) {
+      const filePath = await saveFileDialog({
+        title: t("另存为", "Save as"),
+        defaultPath: clcFileName,
+        filters: [
+          { name: "Caretellia Letter Config", extensions: ["clc"] },
+          { name: "HTML", extensions: ["html"] },
+        ],
+      });
+      if (!filePath) return;
+      const isHtml = filePath.toLowerCase().endsWith(".html");
+      const extension = isHtml ? ".html" : ".clc";
+      const selectedPath = filePath.toLowerCase().endsWith(extension) ? filePath : `${filePath}${extension}`;
+      if (isHtml) {
+        await invoke("save_postcard_html_to_path", { filePath: selectedPath, content: generateHTML() });
+      } else {
+        const bytes = await encodeClc({ ...form, note: form.note ?? "" });
+        await invoke("save_postcard_binary_to_path", {
+          filePath: selectedPath,
+          content: Array.from(bytes),
+        });
+      }
+    } else {
+      type FileSystemSaveHandle = {
+        name: string;
+        createWritable: () => Promise<{
+          write: (data: Blob) => Promise<void>;
+          close: () => Promise<void>;
+        }>;
+      };
+      type SaveFilePicker = (options: {
+        suggestedName: string;
+        types: Array<{ description: string; accept: Record<string, string[]> }>;
+      }) => Promise<FileSystemSaveHandle>;
+      const picker = (window as Window & { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+      if (picker) {
+        const handle = await picker({
+          suggestedName: clcFileName,
+          types: [
+            { description: "Caretellia Letter Config", accept: { "application/octet-stream": [".clc"] } },
+            { description: "HTML", accept: { "text/html": [".html"] } },
+          ],
+        });
+        const isHtml = handle.name.toLowerCase().endsWith(".html");
+        const writable = await handle.createWritable();
+        if (isHtml) {
+          await writable.write(new Blob([generateHTML()], { type: "text/html" }));
+        } else {
+          const bytes = await encodeClc({ ...form, note: form.note ?? "" });
+          const downloadBytes = new Uint8Array(bytes.byteLength);
+          downloadBytes.set(bytes);
+          await writable.write(new Blob([downloadBytes.buffer], { type: "application/octet-stream" }));
+        }
+        await writable.close();
+      } else {
+        const bytes = await encodeClc({ ...form, note: form.note ?? "" });
+        const downloadBytes = new Uint8Array(bytes.byteLength);
+        downloadBytes.set(bytes);
+        downloadFile(new Blob([downloadBytes.buffer], { type: "application/octet-stream" }), clcFileName);
+      }
+    }
+    emit("export", { ...form });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    console.error("Save CLC as failed:", error);
+    exportError.value = t("另存为失败，请检查目标位置和文件格式后重试。", "Save as failed. Check the destination and file format, then try again.");
+  } finally {
+    exportBusy.value = false;
+  }
+}
 
 async function exportHTML() {
+  exportMenuOpen.value = false;
   exportBusy.value = true;
+  exportError.value = "";
   const html = generateHTML();
   const fileName = `postcard-${form.id.slice(0, 8)}.html`;
-
-  invoke("save_postcard", {
-    fileName,
-    content: html,
-    exportDirectory: props.exportDirectory || null,
-  }).then(() => {
+  try {
+    try {
+      await invoke("save_postcard", {
+        fileName,
+        content: html,
+        exportDirectory: props.exportDirectory || null,
+      });
+    } catch (error) {
+      console.error("Unable to save HTML through the native file writer; using browser download:", error);
+      downloadFile(new Blob([html], { type: "text/html" }), fileName);
+    }
     emit("export", { ...form });
-  }).catch(err => {
-    console.error("Export failed:", err);
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-    emit("export", { ...form });
-  }).finally(() => {
+  } catch (error) {
+    console.error("HTML export failed:", error);
+    exportError.value = t("HTML 导出失败，请重试。", "HTML export failed. Please try again.");
+  } finally {
     exportBusy.value = false;
-  });
+  }
 }
 
 const {
@@ -749,9 +875,10 @@ function activateEditorEntry() {
 watch(() => props.editorSessionId, activateEditorEntry);
 
 onMounted(() => {
-  loadHistory();
-  activateEditorEntry();
-  void nextTick(syncRichEditors);
+  void loadHistory().then(() => {
+    activateEditorEntry();
+    return nextTick(syncRichEditors);
+  });
   document.addEventListener("selectionchange", refreshRichFormatting);
 });
 
@@ -977,8 +1104,26 @@ onDeactivated(() => {
       <div class="actions">
         <button class="btn-primary" @click="handleSave">{{ t("保存", "Save") }}</button>
         <button class="btn-secondary" @click="resetForm">{{ t("重置", "Reset") }}</button>
-        <button class="btn-primary" @click="exportHTML" :disabled="exportBusy">{{ exportBusy ? t("正在导出…", "Exporting…") : t("导出 HTML", "Export HTML") }}</button>
+        <button class="btn-secondary" type="button" @click="saveClcAs" :disabled="exportBusy">{{ t("另存为…", "Save as…") }}</button>
+        <div class="export-control">
+          <button class="btn-primary export-main" type="button" @click="exportClc" :disabled="exportBusy">
+            {{ exportBusy ? t("正在导出…", "Exporting…") : t("导出为 CLC", "Export as CLC") }}
+          </button>
+          <button
+            class="btn-primary export-menu-toggle"
+            type="button"
+            :aria-label="t('选择导出格式', 'Choose export format')"
+            :aria-expanded="exportMenuOpen"
+            :disabled="exportBusy"
+            @click="exportMenuOpen = !exportMenuOpen"
+          >{{ exportMenuOpen ? "▴" : "▾" }}</button>
+          <div v-if="exportMenuOpen" class="export-menu" role="menu">
+            <button type="button" role="menuitem" @click="exportHTML">{{ t("导出 HTML", "Export HTML") }}</button>
+          </div>
+        </div>
       </div>
+      <p v-if="historyError" class="editor-error" role="alert">{{ historyError }}</p>
+      <p v-if="exportError" class="editor-error" role="alert">{{ exportError }}</p>
     </div>
 
     <div class="preview-section">
@@ -1700,6 +1845,61 @@ onDeactivated(() => {
   padding: 14px 22px;
   border-top: 1px solid var(--border);
   background: var(--surface);
+}
+
+.export-control {
+  position: relative;
+  display: inline-flex;
+}
+
+.export-control .export-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.export-menu-toggle {
+  min-width: 34px;
+  padding-right: 9px;
+  padding-left: 9px;
+  border-left-color: rgba(255, 255, 255, 0.35);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.export-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 5px 18px rgba(24, 27, 30, 0.16);
+}
+
+.export-menu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.export-menu button:hover,
+.export-menu button:focus-visible {
+  outline: none;
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+.editor-error {
+  margin: 12px 0 0;
+  color: #a52822;
+  font-size: 0.9286em;
 }
 
 .btn-primary,
