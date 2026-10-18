@@ -1,5 +1,7 @@
 # Caretellia
 
+[![publish](https://github.com/chlingzool/caretellia/actions/workflows/tauri-action.yml/badge.svg)](https://github.com/chlingzool/caretellia/actions/workflows/tauri-action.yml)
+
 **Caretellia** 是一款使用 Tauri 2、Vue 3 和 Vite 构建的信件与明信片创作工具。你可以设计信封、明信片和信纸，在应用中预览，并保存为 CLC 或 HTML 文件。
 
 ## 功能
