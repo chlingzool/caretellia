@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import postcardEditor from "./postcard-editor.vue";
 import TemplateGallery from "./TemplateGallery.vue";
 import SettingsPage from "./SettingsPage.vue";
 import ThanksMenu from "./ThanksMenu.vue";
+import { locale, setLocale, syncSystemLocale, t } from "./i18n";
 import type { AppSettings, LetterTemplate } from "./types/postcard";
 
 type Screen =
@@ -23,6 +24,7 @@ const exportDirectoryError = ref("");
 const showThanks = ref(false);
 const thanksButton = ref<HTMLButtonElement | null>(null);
 const settings: AppSettings = reactive(readSettings());
+setLocale(settings.locale);
 const theme = ref<"light" | "dark">(
   localStorage.getItem("caretellia-theme") === "dark" ||
     (localStorage.getItem("caretellia-theme") !== "light" &&
@@ -30,6 +32,9 @@ const theme = ref<"light" | "dark">(
     ? "dark"
     : "light",
 );
+watch(theme, (nextTheme) => {
+  document.documentElement.dataset.theme = nextTheme;
+}, { immediate: true });
 
 const currentScreen = computed(() => screens.value[screens.value.length - 1]);
 
@@ -69,6 +74,7 @@ function readSettings(): AppSettings {
     uiFontSize: 14,
     exportDirectory: "",
     exportColorMode: "system",
+    locale: "system",
   };
   try {
     const saved = localStorage.getItem("caretellia-settings");
@@ -81,6 +87,7 @@ function readSettings(): AppSettings {
       exportColorMode: parsed.exportColorMode === "light" || parsed.exportColorMode === "dark"
         ? parsed.exportColorMode
         : "system",
+      locale: parsed.locale === "en" || parsed.locale === "zh" ? parsed.locale : "system",
     };
   } catch (error) {
     console.error("Unable to load app settings:", error);
@@ -132,12 +139,16 @@ function toggleHistoryDetails(cardId: string) {
   historyDetailsId.value = historyDetailsId.value === cardId ? null : cardId;
 }
 
+function addressName(value: string | undefined, fallback: string) {
+  return value?.replace(/^(来自：|From:\s*|致：|To:\s*)/, "").trim() || fallback;
+}
+
 function openHistoryCard(cardId: string) {
   navigate({ kind: "editor", entry: "history", sessionId: crypto.randomUUID(), cardId });
 }
 
 function deleteHistoryCard(cardId: string) {
-  if (!window.confirm("确定删除这封信件吗？此操作无法撤销。")) return;
+  if (!window.confirm(t("确定删除这封信件吗？此操作无法撤销。", "Delete this letter? This action cannot be undone."))) return;
 
   try {
     const raw = localStorage.getItem("caretellia-postcards");
@@ -151,7 +162,7 @@ function deleteHistoryCard(cardId: string) {
     window.dispatchEvent(new CustomEvent("caretellia-history-changed"));
   } catch (error) {
     console.error("Unable to delete saved letter:", error);
-    historyError.value = "删除失败，请检查本机存储空间后重试。";
+    historyError.value = t("删除失败，请检查本机存储空间后重试。", "Could not delete the letter. Check local storage and try again.");
   }
 }
 
@@ -162,25 +173,26 @@ function toggleTheme() {
 
 function updateSettings(next: AppSettings) {
   Object.assign(settings, next);
+  setLocale(next.locale);
   settingsError.value = "";
   try {
     localStorage.setItem("caretellia-settings", JSON.stringify(settings));
   } catch (error) {
     console.error("Unable to save app settings:", error);
-    settingsError.value = "设置未能保存到本机，请检查存储空间。";
+    settingsError.value = t("设置未能保存到本机，请检查存储空间。", "Settings could not be saved locally. Check available storage.");
   }
 }
 
 async function chooseExportDirectory() {
   exportDirectoryError.value = "";
   try {
-    const selected = await open({ directory: true, multiple: false, title: "选择导出文件夹" });
+    const selected = await open({ directory: true, multiple: false, title: t("选择导出文件夹", "Choose export folder") });
     if (typeof selected === "string") {
       updateSettings({ ...settings, exportDirectory: selected });
     }
   } catch (error) {
     console.error("Unable to select export directory:", error);
-    exportDirectoryError.value = "无法打开文件夹选择器；可以在路径框中手动输入目录。";
+    exportDirectoryError.value = t("无法打开文件夹选择器；可以在路径框中手动输入目录。", "Could not open the folder picker. You can enter a path manually.");
   }
 }
 
@@ -192,9 +204,11 @@ function handleExport(data: any) {
 onMounted(() => {
   refreshHistory();
   const handleStorageUpdate = () => refreshHistory();
+  window.addEventListener("languagechange", syncSystemLocale);
   window.addEventListener("storage", handleStorageUpdate);
   window.addEventListener("caretellia-history-changed", handleStorageUpdate);
   onBeforeUnmount(() => {
+    window.removeEventListener("languagechange", syncSystemLocale);
     window.removeEventListener("storage", handleStorageUpdate);
     window.removeEventListener("caretellia-history-changed", handleStorageUpdate);
   });
@@ -204,25 +218,25 @@ onMounted(() => {
 <template>
   <div class="app-shell" :data-theme="theme" :style="{ '--ui-font-family': settings.uiFont, '--ui-font-size': `${settings.uiFontSize}px` }">
     <header class="app-bar">
-      <button class="brand" type="button" aria-label="回到首页" @click="goHome">
+      <button class="brand" type="button" :aria-label="t('回到首页', 'Go to home')" @click="goHome">
         <span class="brand-mark" aria-hidden="true">✉</span>
         <span class="brand-name">Caretellia</span>
         <span class="brand-divider"></span>
-        <span class="brand-product">明信片工作室</span>
+        <span class="brand-product">{{ t("明信片工作室", "Postcard Studio") }}</span>
       </button>
       <div class="app-actions">
       <button ref="thanksButton" class="thanks-toggle" type="button" :aria-expanded="showThanks" aria-haspopup="dialog" @click="showThanks = true">
         <span aria-hidden="true">♥</span>
-        <span>感谢</span>
+        <span>{{ t("感谢", "Thanks") }}</span>
       </button>
-      <button class="theme-toggle" type="button" aria-label="打开设置" @click="openSettings">
+      <button class="theme-toggle" type="button" :aria-label="t('打开设置', 'Open settings')" @click="openSettings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>
-        <span>设置</span>
+        <span>{{ t("设置", "Settings") }}</span>
       </button>
-      <button class="theme-toggle" type="button" :aria-label="theme === 'light' ? '切换到深色模式' : '切换到浅色模式'" @click="toggleTheme">
+      <button class="theme-toggle" type="button" :aria-label="theme === 'light' ? t('切换到深色模式', 'Switch to dark mode') : t('切换到浅色模式', 'Switch to light mode')" @click="toggleTheme">
         <svg v-if="theme === 'light'" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.5 8.5 0 1 0 20.2 15.4Z" /></svg>
         <svg v-else viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
-        <span>{{ theme === 'light' ? '深色模式' : '浅色模式' }}</span>
+        <span>{{ theme === 'light' ? t("深色模式", "Dark mode") : t("浅色模式", "Light mode") }}</span>
       </button>
       </div>
     </header>
@@ -231,25 +245,25 @@ onMounted(() => {
       <template v-if="currentScreen.kind === 'home'">
         <section class="welcome">
           <div>
-            <p class="eyebrow">你的私人信笺工作区</p>
-            <h1 class="page-title">把心意，写成一封信。</h1>
-            <p class="page-subtitle">设计一张明信片或一封信，让重要的话值得被珍藏。</p>
+            <p class="eyebrow">{{ t("你的私人信笺工作区", "Your personal letter workspace") }}</p>
+            <h1 class="page-title">{{ t("把心意，写成一封信。", "Make your message a letter.") }}</h1>
+            <p class="page-subtitle">{{ t("设计一张明信片或一封信，让重要的话值得被珍藏。", "Design a postcard or letter to make your words worth keeping.") }}</p>
           </div>
           <div class="welcome-stat">
             <span class="stat-number">{{ savedCount }}</span>
-            <span class="stat-label">封存的信件</span>
+            <span class="stat-label">{{ t("封存的信件", "Saved letters") }}</span>
           </div>
         </section>
 
-        <section class="home-shell" aria-label="工作区入口">
+        <section class="home-shell" :aria-label="t('工作区入口', 'Workspace shortcuts')">
           <button class="home-card primary" type="button" @click="openNewEditor">
             <span class="card-icon compose-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M4 20h4l11-11a2.1 2.1 0 0 0-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4M13 20h7" /></svg>
             </span>
             <span class="home-card-copy">
-              <span class="home-card-label">从一张白纸开始</span>
-              <strong>新建信件</strong>
-              <small>挑选信封、明信片或单面信纸，开始写下你的心意。</small>
+              <span class="home-card-label">{{ t("从一张白纸开始", "Start with a blank page") }}</span>
+              <strong>{{ t("新建信件", "New letter") }}</strong>
+              <small>{{ t("挑选信封、明信片或单面信纸，开始写下你的心意。", "Choose an envelope, postcard, or letter sheet and start writing.") }}</small>
             </span>
             <span class="card-arrow" aria-hidden="true">→</span>
           </button>
@@ -259,9 +273,9 @@ onMounted(() => {
               <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1" /><path d="M8 4v16M8 9h13M8 15h13" /></svg>
             </span>
             <span class="home-card-copy">
-              <span class="home-card-label">选择版式与文案</span>
-              <strong>从模板开始</strong>
-              <small>像挑选幻灯片一样预览并选择单独模板。</small>
+              <span class="home-card-label">{{ t("选择版式与文案", "Choose a layout and message") }}</span>
+              <strong>{{ t("从模板开始", "Browse templates") }}</strong>
+              <small>{{ t("像挑选幻灯片一样预览并选择单独模板。", "Preview and choose a design, just like picking a presentation theme.") }}</small>
             </span>
             <span class="card-arrow" aria-hidden="true">→</span>
           </button>
@@ -271,44 +285,44 @@ onMounted(() => {
               <svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v3H3zM9 11h6" /></svg>
             </span>
             <span class="home-card-copy">
-              <span class="home-card-label">回到珍藏的时刻</span>
-              <strong>历史信件</strong>
-              <small>{{ savedCount }} 封已保存，可随时继续编辑。</small>
+              <span class="home-card-label">{{ t("回到珍藏的时刻", "Return to your saved moments") }}</span>
+              <strong>{{ t("历史信件", "Letter history") }}</strong>
+              <small>{{ t(`${savedCount} 封已保存，可随时继续编辑。`, `${savedCount} saved. Continue editing any time.`) }}</small>
             </span>
             <span class="card-arrow" aria-hidden="true">→</span>
           </button>
         </section>
 
-        <p class="home-footnote"><span class="status-dot"></span> 所有内容只保存在这台设备上</p>
+        <p class="home-footnote"><span class="status-dot"></span> {{ t("所有内容只保存在这台设备上", "Everything is stored on this device only") }}</p>
       </template>
 
       <template v-else-if="currentScreen.kind === 'history'">
         <div class="command-bar">
-          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> 首页</button>
-          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> 返回</button>
+          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> {{ t("首页", "Home") }}</button>
+          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> {{ t("返回", "Back") }}</button>
           <span class="command-divider"></span>
-          <span class="command-context">历史信件</span>
+          <span class="command-context">{{ t("历史信件", "Letter history") }}</span>
           <div class="toolbar-segment right">
-            <button class="toolbar-btn primary-command" type="button" @click="openNewEditor"><span aria-hidden="true">＋</span> 新建信件</button>
+            <button class="toolbar-btn primary-command" type="button" @click="openNewEditor"><span aria-hidden="true">＋</span> {{ t("新建信件", "New letter") }}</button>
           </div>
         </div>
 
         <section class="page-heading">
           <div>
-            <p class="eyebrow">你的收藏</p>
-            <h1 class="page-title">历史信件</h1>
-            <p class="page-subtitle">每一封都保存于本机，可以随时回来继续编辑。</p>
+            <p class="eyebrow">{{ t("你的收藏", "Your collection") }}</p>
+            <h1 class="page-title">{{ t("历史信件", "Letter history") }}</h1>
+            <p class="page-subtitle">{{ t("每一封都保存于本机，可以随时回来继续编辑。", "Every letter is saved locally and can be edited again at any time.") }}</p>
           </div>
-          <span class="count-badge">{{ savedCount }} 封</span>
+          <span class="count-badge">{{ t(`${savedCount} 封`, `${savedCount} letters`) }}</span>
         </section>
 
         <p v-if="historyError" class="history-error" role="alert">{{ historyError }}</p>
         <section class="panel-shell">
           <div v-if="historyCards.length === 0" class="empty-state">
             <span class="empty-icon" aria-hidden="true">✉</span>
-            <strong>这里还没有信件</strong>
-            <span>创建并保存第一封信，它会出现在这里。</span>
-            <button class="toolbar-btn primary-command" type="button" @click="openNewEditor">新建信件</button>
+            <strong>{{ t("这里还没有信件", "No letters yet") }}</strong>
+            <span>{{ t("创建并保存第一封信，它会出现在这里。", "Create and save your first letter to see it here.") }}</span>
+            <button class="toolbar-btn primary-command" type="button" @click="openNewEditor">{{ t("新建信件", "New letter") }}</button>
           </div>
 
           <article v-for="card in historyCards" :key="card.id" class="history-entry">
@@ -323,24 +337,24 @@ onMounted(() => {
           >
             <span class="history-type-icon" aria-hidden="true">{{ card.type === 'envelope' ? '✉' : card.type === 'letter' ? '▤' : '▧' }}</span>
             <span class="history-info history-open-button">
-              <span class="history-title">{{ card.title || '未命名' }}<span class="type-tag">{{ card.type === 'envelope' ? '信封' : card.type === 'letter' ? '信纸' : '明信片' }}</span></span>
-              <span class="history-address">{{ card.from || '来自：我' }} <span aria-hidden="true">→</span> {{ card.to || '致：你' }}</span>
+              <span class="history-title">{{ card.title || t('未命名', 'Untitled') }}<span class="type-tag">{{ card.type === 'envelope' ? t('信封', 'Envelope') : card.type === 'letter' ? t('信纸', 'Letter sheet') : t('明信片', 'Postcard') }}</span></span>
+              <span class="history-address">{{ t("来自：", "From: ") }}{{ addressName(card.from, t("我", "Me")) }} <span aria-hidden="true">→</span> {{ t("致：", "To: ") }}{{ addressName(card.to, t("你", "You")) }}</span>
               <span v-if="card.note" class="history-note">{{ card.note }}</span>
-              <span class="history-date">{{ new Date(card.createdAt || Date.now()).toLocaleString() }}</span>
+              <span class="history-date">{{ new Date(card.createdAt || Date.now()).toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN') }}</span>
             </span>
             <div class="history-actions">
-              <button class="delete-button" type="button" :aria-label="`删除${card.title || '未命名信件'}`" @click.stop="deleteHistoryCard(card.id)">删除</button>
-              <button class="history-open" type="button" @click.stop="openHistoryCard(card.id)">打开 <span aria-hidden="true">→</span></button>
+              <button class="delete-button" type="button" :aria-label="t(`删除${card.title || '未命名信件'}`, `Delete ${card.title || 'untitled letter'}`)" @click.stop="deleteHistoryCard(card.id)">{{ t("删除", "Delete") }}</button>
+              <button class="history-open" type="button" @click.stop="openHistoryCard(card.id)">{{ t("打开", "Open") }} <span aria-hidden="true">→</span></button>
             </div>
           </div>
           <div v-if="historyDetailsId === card.id" class="history-details" @click.stop>
-            <p><strong>标题：</strong>{{ card.title || '未命名' }}</p>
-            <p><strong>类型：</strong>{{ card.type === 'envelope' ? '信封' : card.type === 'letter' ? '信纸' : '明信片' }}</p>
-            <p><strong>寄件人：</strong>{{ card.from || '来自：我' }}　<strong>收件人：</strong>{{ card.to || '致：你' }}</p>
-            <p v-if="card.note"><strong>备注：</strong>{{ card.note }}</p>
-            <p v-if="card.message"><strong>正文：</strong><span class="detail-copy">{{ card.message }}</span></p>
-            <p v-if="card.type === 'postcard' && card.backCaption"><strong>背面文字：</strong><span class="detail-copy">{{ card.backCaption }}</span></p>
-            <p v-if="card.type === 'postcard' && card.caption"><strong>正面文字：</strong>{{ card.caption }}</p>
+            <p><strong>{{ t("标题：", "Title: ") }}</strong>{{ card.title || t("未命名", "Untitled") }}</p>
+            <p><strong>{{ t("类型：", "Type: ") }}</strong>{{ card.type === 'envelope' ? t('信封', 'Envelope') : card.type === 'letter' ? t('信纸', 'Letter sheet') : t('明信片', 'Postcard') }}</p>
+            <p><strong>{{ t("寄件人：", "From: ") }}</strong>{{ addressName(card.from, t("我", "Me")) }}　<strong>{{ t("收件人：", "To: ") }}</strong>{{ addressName(card.to, t("你", "You")) }}</p>
+            <p v-if="card.note"><strong>{{ t("备注：", "Note: ") }}</strong>{{ card.note }}</p>
+            <p v-if="card.message"><strong>{{ t("正文：", "Message: ") }}</strong><span class="detail-copy">{{ card.message }}</span></p>
+            <p v-if="card.type === 'postcard' && card.backCaption"><strong>{{ t("背面文字：", "Back text: ") }}</strong><span class="detail-copy">{{ card.backCaption }}</span></p>
+            <p v-if="card.type === 'postcard' && card.caption"><strong>{{ t("正面文字：", "Front text: ") }}</strong>{{ card.caption }}</p>
           </div>
           </article>
         </section>
@@ -348,20 +362,20 @@ onMounted(() => {
 
       <template v-else-if="currentScreen.kind === 'templates'">
         <div class="command-bar">
-          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> 首页</button>
-          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> 返回</button>
+          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> {{ t("首页", "Home") }}</button>
+          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> {{ t("返回", "Back") }}</button>
           <span class="command-divider"></span>
-          <span class="command-context">模板库</span>
+          <span class="command-context">{{ t("模板库", "Templates") }}</span>
         </div>
         <TemplateGallery @select="openTemplateEditor" />
       </template>
 
       <template v-else-if="currentScreen.kind === 'settings'">
         <div class="command-bar">
-          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> 首页</button>
-          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> 返回</button>
+          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> {{ t("首页", "Home") }}</button>
+          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> {{ t("返回", "Back") }}</button>
           <span class="command-divider"></span>
-          <span class="command-context">设置</span>
+          <span class="command-context">{{ t("设置", "Settings") }}</span>
         </div>
         <SettingsPage
           :settings="settings"
@@ -374,12 +388,12 @@ onMounted(() => {
 
       <template v-else-if="currentScreen.kind === 'editor'">
         <div class="command-bar">
-          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> 首页</button>
-          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> 返回</button>
+          <button class="toolbar-btn" type="button" @click="goHome"><span aria-hidden="true">⌂</span> {{ t("首页", "Home") }}</button>
+          <button class="toolbar-btn back-btn" type="button" @click="goBack"><span aria-hidden="true">←</span> {{ t("返回", "Back") }}</button>
           <span class="command-divider"></span>
-          <span class="command-context">{{ currentScreen.entry === 'new' ? '新建信件' : currentScreen.entry === 'template' ? '从模板开始' : '编辑信件' }}</span>
+          <span class="command-context">{{ currentScreen.entry === 'new' ? t('新建信件', 'New letter') : currentScreen.entry === 'template' ? t('从模板开始', 'From template') : t('编辑信件', 'Edit letter') }}</span>
           <div class="toolbar-segment right">
-            <button class="toolbar-btn" type="button" @click="openHistoryScreen">历史</button>
+            <button class="toolbar-btn" type="button" @click="openHistoryScreen">{{ t("历史", "History") }}</button>
           </div>
         </div>
       </template>
