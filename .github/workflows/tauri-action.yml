@@ -74,3 +74,35 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  mobile-build:
+    name: Build mobile artifacts
+    needs: publish-tauri
+    permissions:
+      contents: read
+    uses: ./.github/workflows/mobile-build.yml
+
+  publish-mobile:
+    name: Attach mobile artifacts to release
+    needs:
+      - publish-tauri
+      - mobile-build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: download mobile artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: caretellia-*
+          path: mobile-artifacts
+          merge-multiple: true
+
+      - name: upload mobile artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag_name="app-v$(node -p 'require("./src-tauri/tauri.conf.json").version')"
+          gh release upload "$tag_name" mobile-artifacts/* --clobber
