@@ -101,7 +101,7 @@ onBeforeUnmount(() => {
 
         <section class="thanks-section special-thanks" aria-labelledby="special-heading">
           <h3 id="special-heading">{{ t("特别感谢", "Special thanks") }}</h3>
-          <p>{{ t("项目全部代码交由", "All project code was written by") }} <a href="https://github.com/features/copilot" target="_blank" rel="noreferrer">GitHub Copilot</a> {{ t("负责(已进行人工审核)，感谢 GitHub 让我这种穷学生也吃上好的了。", "(and manually reviewed). Thanks to GitHub for giving a broke student like me access to the good stuff.") }}</p>
+          <p>{{ t("在", "Before") }} <a href="https://github.com/chlingzool/caretellia/commit/4a7a2f8796c6f306ddaa1289828882cb48b4c1e1">Commit 4a7a2f8</a> {{ t("之前, 项目大部分代码交由", "most of all project code was written by") }} <a href="https://github.com/features/copilot" target="_blank" rel="noreferrer">GitHub Copilot</a> {{ t("负责(已进行人工审核)，感谢 GitHub 让我这种穷学生也吃上好的了。", "(and manually reviewed). Thanks to GitHub for giving a broke student like me access to the good stuff.") }}</p>
         </section>
       </div>
     </section>

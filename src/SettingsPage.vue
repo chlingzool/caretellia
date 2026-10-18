@@ -421,7 +421,7 @@ h1 {
 
   .settings-nav {
     position: sticky;
-    top: 0;
+    top: calc(52px + env(safe-area-inset-top, 0px));
     z-index: 10;
     display: flex;
     overflow-x: auto;
@@ -433,6 +433,7 @@ h1 {
 
   .settings-nav button {
     flex: 0 0 auto;
+    min-height: 44px;
     white-space: nowrap;
     border-left: 0;
     border-bottom: 2px solid transparent;
@@ -459,6 +460,20 @@ h1 {
 
   .font-select-wrap {
     width: 100%;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .setting-row select,
+  .directory-control input,
+  .browse-button,
+  .font-refresh {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .settings-section {
+    scroll-margin-top: calc(108px + env(safe-area-inset-top, 0px));
   }
 }
 </style>

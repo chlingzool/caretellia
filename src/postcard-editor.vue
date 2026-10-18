@@ -1126,7 +1126,7 @@ onDeactivated(() => {
       <p v-if="exportError" class="editor-error" role="alert">{{ exportError }}</p>
     </div>
 
-    <div class="preview-section">
+    <div class="preview-section" :class="{ 'envelope-expanded-preview': form.type === 'envelope' && isExpanded }">
       <div class="preview-heading">
         <h3>{{ t("预览", "Preview") }} <span>· {{ form.type === 'envelope' ? (!isOpened ? t('点击打开信封', 'Click to open the envelope') : !isExpanded ? t('再次点击抽出信纸', 'Click again to pull out the letter') : t('点击收起信纸', 'Click to put away the letter')) : form.type === 'postcard' ? t('点击明信片翻面', 'Click to flip the postcard') : t('单面信纸', 'Single-sided letter sheet') }}</span></h3>
         <span class="resize-label">{{ t("拖动调整大小", "Drag to resize") }}</span>
@@ -1950,6 +1950,14 @@ onDeactivated(() => {
   background: var(--surface);
 }
 
+.preview-section.envelope-expanded-preview {
+  position: static;
+}
+
+.preview-section :deep(.mail-stage.expanded) {
+  aspect-ratio: auto;
+}
+
 .preview-heading {
   display: flex;
   align-items: baseline;
@@ -2010,29 +2018,6 @@ onDeactivated(() => {
   height: auto;
   aspect-ratio: 8 / 5;
   box-sizing: border-box;
-}
-
-.preview-section :deep(.mail-stage.expanded) {
-  height: auto;
-  aspect-ratio: 8 / 5;
-}
-
-.preview-section :deep(.mail-stage.expanded .letter-mask) {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) translateY(-70px);
-  width: calc(100% - 32px);
-  max-width: calc(100% - 32px);
-  height: auto;
-  min-height: 320px;
-  overflow: visible;
-  margin: 0;
-}
-
-.preview-section :deep(.mail-stage.expanded .letter-paper) {
-  height: auto;
-  min-height: 320px;
 }
 
 .preview-section :deep(.mail-stage.expanded .paper-lines) {
@@ -2175,6 +2160,7 @@ onDeactivated(() => {
   .resize-label {
     display: none;
   }
+
 }
 
 @media (max-width: 600px) {
@@ -2227,6 +2213,53 @@ onDeactivated(() => {
     margin-left: -14px;
     padding-right: 14px;
     padding-left: 14px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .field input,
+  .field textarea,
+  .field select,
+  .rich-editor {
+    font-size: 16px;
+    scroll-margin-block: 84px;
+  }
+
+  .field input,
+  .field select,
+  .btn-primary,
+  .btn-secondary,
+  .rich-toolbar button,
+  .font-refresh,
+  .preset-btn {
+    min-height: 44px;
+  }
+
+  .rich-toolbar button {
+    min-width: 44px;
+  }
+
+  .sticker-control {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  .sticker-resize {
+    width: 34px;
+    height: 34px;
+    right: -17px;
+    bottom: -17px;
+  }
+
+  .sticker-rotate {
+    top: -48px;
+    left: calc(50% - 22px);
+  }
+
+  .sticker-remove {
+    top: -18px;
+    right: -18px;
   }
 }
 

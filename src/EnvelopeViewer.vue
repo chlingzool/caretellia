@@ -628,7 +628,7 @@ button.viewer-entry-main:hover strong {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow: auto;
+  overflow: visible;
   padding: 12px;
   background: var(--surface-alt);
 }
@@ -643,16 +643,8 @@ button.viewer-entry-main:hover strong {
   aspect-ratio: 8 / 5;
 }
 
-.viewer-stage :deep(.mail-stage.expanded .letter-mask) {
-  width: calc(100% - 34px);
-  height: auto;
-  min-height: 300px;
-  overflow: visible;
-  transform: translate(-50%, -50%) translateY(-64px);
-}
-
-.viewer-stage :deep(.mail-stage.expanded .letter-paper) {
-  min-height: 300px;
+.viewer-stage :deep(.mail-stage.expanded) {
+  aspect-ratio: auto;
 }
 
 .viewer-stage :deep(.flip-scene) {
@@ -691,6 +683,7 @@ button.viewer-entry-main:hover strong {
     min-height: 430px;
     padding: 14px;
   }
+
 }
 
 @media (max-width: 520px) {
@@ -720,6 +713,23 @@ button.viewer-entry-main:hover strong {
   .viewer-stage :deep(.mail-stage.expanded .letter-mask),
   .viewer-stage :deep(.mail-stage.expanded .letter-paper) {
     min-height: 240px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .viewer-library {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .command-bar > button,
+  .toolbar-btn,
+  .viewer-entry-remove {
+    min-height: 44px;
+  }
+
+  .viewer-section-heading {
+    min-height: 48px;
   }
 }
 </style>

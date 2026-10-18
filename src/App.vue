@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import postcardEditor from "./postcard-editor.vue";
 import TemplateGallery from "./TemplateGallery.vue";
@@ -33,6 +34,7 @@ const mobileMenuOpen = ref(false);
 const thanksButton = ref<HTMLButtonElement | null>(null);
 const mobileMenuButton = ref<HTMLButtonElement | null>(null);
 const mobileMenuRoot = ref<HTMLElement | null>(null);
+let androidBackButtonListener: Awaited<ReturnType<typeof onBackButtonPress>> | null = null;
 const settings: AppSettings = reactive(readSettings());
 setLocale(settings.locale);
 const theme = ref<"light" | "dark">(
@@ -259,8 +261,31 @@ function handleExport(data: any) {
 
 const handleStorageUpdate = () => refreshHistory();
 
+function handleAndroidBackButton(canGoBack: boolean) {
+  if (mobileMenuOpen.value) {
+    mobileMenuOpen.value = false;
+  } else if (showThanks.value) {
+    closeThanks();
+  } else if (showExport.value) {
+    showExport.value = false;
+  } else if (screens.value.length > 1) {
+    goBack();
+  } else if (canGoBack) {
+    window.history.back();
+  } else {
+    void exit(0).catch((error) => console.error("Unable to exit Caretellia from the Android back button:", error));
+  }
+}
+
 onMounted(() => {
   void refreshHistory();
+  if ("__TAURI_INTERNALS__" in window && /android/i.test(navigator.userAgent)) {
+    void onBackButtonPress(({ canGoBack }) => handleAndroidBackButton(canGoBack))
+      .then((listener) => {
+        androidBackButtonListener = listener;
+      })
+      .catch((error) => console.error("Unable to register Android back-button handling:", error));
+  }
   document.addEventListener("keydown", handleMobileMenuKeydown);
   document.addEventListener("pointerdown", handleOutsideMenuClick);
   window.addEventListener("languagechange", syncSystemLocale);
@@ -269,6 +294,10 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (androidBackButtonListener) {
+    void androidBackButtonListener.unregister()
+      .catch((error) => console.error("Unable to unregister Android back-button handling:", error));
+  }
   document.removeEventListener("keydown", handleMobileMenuKeydown);
   document.removeEventListener("pointerdown", handleOutsideMenuClick);
   window.removeEventListener("languagechange", syncSystemLocale);
@@ -359,7 +388,7 @@ onBeforeUnmount(() => {
             <span class="home-card-copy">
               <span class="home-card-label">{{ t("选择版式与文案", "Choose a layout and message") }}</span>
               <strong>{{ t("从模板开始", "Browse templates") }}</strong>
-              <small>{{ t("像挑选幻灯片一样预览并选择单独模板。", "Preview and choose a design, just like picking a presentation theme.") }}</small>
+              <small>{{ t("先看效果，再挑一份合适的版式与文案。", "Preview a design, then choose a layout and message to make your own.") }}</small>
             </span>
             <span class="card-arrow" aria-hidden="true">→</span>
           </button>
@@ -539,6 +568,7 @@ onBeforeUnmount(() => {
   --accent-tint: #eaf4fc;
   --success: #107c41;
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text);
   background: var(--app-bg);
   color-scheme: light;
@@ -1201,10 +1231,11 @@ onBeforeUnmount(() => {
 
 @media (max-width: 680px) {
   .app-bar {
-    position: relative;
+    position: sticky;
+    top: 0;
     z-index: 20;
     height: 52px;
-    padding: 0 16px;
+    padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
   }
 
   .brand-product,
@@ -1222,7 +1253,10 @@ onBeforeUnmount(() => {
 
   .theme-mode-toggle {
     gap: 0;
-    padding: 7px;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
   }
 
   .theme-mode-toggle span {
@@ -1237,8 +1271,8 @@ onBeforeUnmount(() => {
   .mobile-menu-toggle {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     padding: 7px;
     border: 1px solid var(--border);
     border-radius: 3px;
@@ -1286,7 +1320,7 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 42px;
+    min-height: 44px;
     padding: 8px 10px;
     border: 1px solid transparent;
     background: transparent;
@@ -1321,12 +1355,12 @@ onBeforeUnmount(() => {
   }
 
   .thanks-toggle {
-    min-height: 32px;
+    min-height: 44px;
     padding: 5px 8px;
   }
 
   .container {
-    padding: 14px 16px 44px;
+    padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(44px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
   }
 
   .welcome {
@@ -1388,6 +1422,23 @@ onBeforeUnmount(() => {
   background: var(--surface);
   color: var(--muted);
   font-size: 0.8571em;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .app-shell button,
+  .app-shell [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .home-card {
+    min-height: 96px;
+  }
+
+  .history-actions button {
+    min-height: 44px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
 }
 </style>
 <style>
