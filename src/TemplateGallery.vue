@@ -1,30 +1,40 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { letterTemplates } from "./templates";
+import { letterTemplates, localizeTemplate } from "./templates";
+import { locale, t } from "./i18n";
 import type { LetterTemplate } from "./types/postcard";
 
 const emit = defineEmits<{
   (event: "select", template: LetterTemplate): void;
 }>();
 
-const categories = ["全部", "明信片", "信封", "信纸", "文案风格"] as const;
-const activeCategory = ref<(typeof categories)[number]>("全部");
-const visibleTemplates = computed(() =>
-  activeCategory.value === "全部"
-    ? letterTemplates
-    : letterTemplates.filter((template) => template.category === activeCategory.value),
+const categories = ["all", "明信片", "信封", "信纸", "文案风格"] as const;
+const activeCategory = ref<(typeof categories)[number]>("all");
+const localizedTemplates = computed(() =>
+  letterTemplates.map((template) => localizeTemplate(template, locale.value)),
 );
+const visibleTemplates = computed(() => activeCategory.value === "all"
+  ? localizedTemplates.value
+  : localizedTemplates.value.filter((template) => template.category === activeCategory.value));
+
+function categoryLabel(category: (typeof categories)[number]) {
+  if (category === "all") return t("全部", "All");
+  if (category === "明信片") return t("明信片", "Postcard");
+  if (category === "信封") return t("信封", "Envelope");
+  if (category === "信纸") return t("信纸", "Letter sheet");
+  return t("文案风格", "Writing styles");
+}
 </script>
 
 <template>
   <section class="template-gallery">
     <header class="gallery-heading">
       <div>
-        <p class="eyebrow">灵感与版式</p>
-        <h1>从模板开始</h1>
-        <p class="description">像挑选演示文稿主题一样，选一张版式，再替换成自己的内容。</p>
+        <p class="eyebrow">{{ t("灵感与版式", "Inspiration & layouts") }}</p>
+        <h1>{{ t("从模板开始", "Browse templates") }}</h1>
+        <p class="description">{{ t("像挑选演示文稿主题一样，选一张版式，再替换成自己的内容。", "Choose a layout, then make it your own.") }}</p>
       </div>
-      <span class="template-count">{{ visibleTemplates.length }} 个模板</span>
+      <span class="template-count">{{ t(`${visibleTemplates.length} 个模板`, `${visibleTemplates.length} templates`) }}</span>
     </header>
 
     <nav class="category-filter" aria-label="模板分类">
@@ -34,7 +44,7 @@ const visibleTemplates = computed(() =>
         type="button"
         :class="{ active: activeCategory === category }"
         @click="activeCategory = category"
-      >{{ category }}</button>
+      >{{ categoryLabel(category) }}</button>
     </nav>
 
     <div class="template-grid">
@@ -55,10 +65,10 @@ const visibleTemplates = computed(() =>
         </span>
         <span class="template-meta">
           <span class="template-title">{{ template.label }}</span>
-          <span class="template-category">{{ template.category }}</span>
+          <span class="template-category">{{ categoryLabel(template.category) }}</span>
           <span class="template-description">{{ template.description }}</span>
         </span>
-        <span class="template-use">使用模板 <span aria-hidden="true">→</span></span>
+        <span class="template-use">{{ t("使用模板", "Use template") }} <span aria-hidden="true">→</span></span>
       </button>
     </div>
   </section>

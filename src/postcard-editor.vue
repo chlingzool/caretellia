@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, onDeactivated, nex
 import { invoke } from "@tauri-apps/api/core";
 import FontSelect from "./components/FontSelect.vue";
 import { DEFAULT_FONT_FAMILIES, SYSTEM_DEFAULT_FONT, useSystemFonts } from "./composables/useSystemFonts";
+import { locale, t } from "./i18n";
 import type { LetterSticker, LetterTemplate, PostcardData } from "./types/postcard";
 import postcardDisplayStyles from "./postcard-display.css?inline";
 import "./postcard-display.css";
@@ -33,14 +34,14 @@ const form = reactive<PostcardData>({
   id: crypto.randomUUID(),
   type: "postcard",
   title: "A Letter",
-  message: "亲爱的朋友，\n\n愿你今天也拥有美好的一天。\n\n带着爱，",
+  message: t("亲爱的朋友，\n\n愿你今天也拥有美好的一天。\n\n带着爱，", "Dear friend,\n\nI hope you have a wonderful day.\n\nWith love,"),
   messageHtml: "",
-  caption: "愿你此刻闪耀",
-  backCaption: "背面写字区域",
+  caption: t("愿你此刻闪耀", "Shine bright today"),
+  backCaption: t("背面写字区域", "Write on the back"),
   backCaptionHtml: "",
   note: "",
-  from: "来自：我",
-  to: "致：你",
+  from: t("来自：我", "From: Me"),
+  to: t("致：你", "To: You"),
   bgColor: "#f8f7f3",
   textColor: "#41433f",
   fontSize: 18,
@@ -370,14 +371,14 @@ function resetForm() {
   form.id = crypto.randomUUID();
   form.type = "postcard";
   form.title = "A Letter";
-  form.message = "亲爱的朋友，\n\n愿你今天也拥有美好的一天。\n\n带着爱，";
+  form.message = t("亲爱的朋友，\n\n愿你今天也拥有美好的一天。\n\n带着爱，", "Dear friend,\n\nI hope you have a wonderful day.\n\nWith love,");
   form.messageHtml = "";
-  form.caption = "愿你此刻闪耀";
-  form.backCaption = "背面写字区域";
+  form.caption = t("愿你此刻闪耀", "Shine bright today");
+  form.backCaption = t("背面写字区域", "Write on the back");
   form.backCaptionHtml = "";
   form.note = "";
-  form.from = "来自：我";
-  form.to = "致：你";
+  form.from = t("来自：我", "From: Me");
+  form.to = t("致：你", "To: You");
   form.bgColor = "#f8f7f3";
   form.textColor = "#41433f";
   form.titleFont = "Georgia";
@@ -538,8 +539,8 @@ function setActiveRichEditor(event: FocusEvent) {
 }
 
 function generateHTML(embeddedFontCSS = ""): string {
-  const fromText = form.from.replace("来自：", "");
-  const toText = form.to.replace("致：", "");
+  const fromText = form.from.replace(/^(来自：|From:\s*)/, "");
+  const toText = form.to.replace(/^(致：|To:\s*)/, "");
   const letterWidth = letterCanvas.value?.getBoundingClientRect().width;
   const letterWidthRule = letterWidth
     ? `.letter-sheet-frame{width:min(92vw,${letterWidth.toFixed(2)}px)}`
@@ -550,7 +551,7 @@ function generateHTML(embeddedFontCSS = ""): string {
     : esc(stamp);
   const cardImg = form.cardImage
     ? `<img src="${form.cardImage}" style="width:100%;height:100%;object-fit:cover" alt="">`
-    : `<div class="image-placeholder">点击上传图片</div>`;
+    : `<div class="image-placeholder">${t("点击上传图片", "Click to upload an image")}</div>`;
 
   const envelopeHTML = `<div class="mail-stage" id="stage" style="--font-scale:${form.fontSize / 18}">
 <div class="letter-mask"><div class="letter-paper"><div class="paper-lines rich-text-body" style="font-family:'${form.messageFont}'">${safeMessageHtml.value}</div><div class="paper-footer" style="font-family:'${form.fromFont}'"><span>${esc(fromText)}</span><span>${esc(toText)}</span></div></div></div>
@@ -559,7 +560,7 @@ function generateHTML(embeddedFontCSS = ""): string {
 <div class="envelope-flap"></div>
 </div>
 </div>
-<div class="hint-bar" id="hint">点击打开信纸</div>`;
+<div class="hint-bar" id="hint">${t("点击打开信纸", "Click to open the letter")}</div>`;
 
   const letterHTML = `<div class="letter-sheet-frame" style="--font-scale:${form.fontSize / 18}"><article class="letter-sheet" style="background-color:${form.bgColor};color:${form.textColor};font-family:'${form.messageFont}';font-size:${form.fontSize}px;border:1px ${form.borderStyle} ${form.borderColor}">
 <h1 style="font-family:'${form.titleFont}'">${esc(form.title)}</h1>
@@ -586,7 +587,7 @@ ${(form.stickers ?? []).map(stickerMarkup).join("")}
 </div>
 </div>
 </div>
-<div class="hint-bar" id="hint">点击明信片翻面</div>`;
+<div class="hint-bar" id="hint">${t("点击明信片翻面", "Click to flip the postcard")}</div>`;
 
   const stageHTML = form.type === "envelope"
     ? envelopeHTML
@@ -604,7 +605,7 @@ stage.addEventListener("click",function(){
 function upd(){
   stage.className="mail-stage"+(isOpened?" opened":"")+(isExpanded?" expanded":"");
   stage.style.cursor=isExpanded?"default":"pointer";
-  hint.textContent=!isOpened?"点击信封开封":!isExpanded?"再次点击展开信纸":"点击收起信纸并合上信封";
+  hint.textContent=!isOpened?"${t("点击信封开封", "Click the envelope to open it")}":!isExpanded?"${t("再次点击展开信纸", "Click again to pull out the letter")}":"${t("点击收起信纸并合上信封", "Click to return the letter and close the envelope")}";
 }`;
 
   const postcardScript = `
@@ -613,7 +614,7 @@ var stage=document.getElementById("stage"),hint=document.getElementById("hint"),
 stage.addEventListener("click",function(){
   flipped=!flipped;
   flipCard.classList.toggle("flipped",flipped);
-  hint.textContent=flipped?"点击明信片翻回":"点击明信片翻面";
+  hint.textContent=flipped?"${t("点击明信片翻回", "Click to flip the postcard back")}":"${t("点击明信片翻面", "Click to flip the postcard")}";
 });`;
 
   const script = form.type === "envelope" ? envelopeScript : form.type === "postcard" ? postcardScript : "";
@@ -622,7 +623,7 @@ stage.addEventListener("click",function(){
     : `<div class="title-bar"><h1>${esc(form.title)}</h1></div>`;
 
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${locale.value === "en" ? "en" : "zh-CN"}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -630,6 +631,13 @@ stage.addEventListener("click",function(){
 <style>
 ${embeddedFontCSS}
 *{margin:0;padding:0;box-sizing:border-box}
+:root{--scrollbar-thumb:#b8c3cd;--scrollbar-thumb-hover:#8e9daa;--scrollbar-track:#edf1f5;scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin}
+*{scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin}
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background-color:var(--scrollbar-track)}
+*::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:4px;background-color:var(--scrollbar-thumb);background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background-color:var(--scrollbar-thumb-hover)}
+*::-webkit-scrollbar-corner{background-color:var(--scrollbar-track)}
 body{--font-scale:${form.fontSize / 18};min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:24px;padding:82px 16px 70px;background:#f1f0ec;overflow:auto;font-family:Georgia,"Noto Serif SC",serif}
 .title-bar{position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:100}
 .title-bar h1{font-size:calc(20px * var(--font-scale));font-weight:500;color:#393b37;letter-spacing:1px}
@@ -640,8 +648,8 @@ ${postcardDisplayStyles}
 body{background:var(--page-bg)}
 .title-bar h1{color:var(--page-title)}
 .hint-bar{color:var(--page-hint)}
-body[data-color-mode="dark"]{color-scheme:dark;--page-bg:#202326;--page-title:#eee9df;--page-hint:#c3bbb0}
-@media(prefers-color-scheme:dark){body[data-color-mode="system"]{color-scheme:dark;--page-bg:#202326;--page-title:#eee9df;--page-hint:#c3bbb0}}
+body[data-color-mode="dark"]{color-scheme:dark;--page-bg:#202326;--page-title:#eee9df;--page-hint:#c3bbb0;--scrollbar-thumb:#596570;--scrollbar-thumb-hover:#788692;--scrollbar-track:#252b31}
+@media(prefers-color-scheme:dark){body[data-color-mode="system"]{color-scheme:dark;--page-bg:#202326;--page-title:#eee9df;--page-hint:#c3bbb0;--scrollbar-thumb:#596570;--scrollbar-thumb-hover:#788692;--scrollbar-track:#252b31}}
 .mail-stage,.flip-scene,.letter-sheet-frame{margin-block:auto}
 .mail-stage{width:min(88vw,720px);height:min(56vw,450px);min-height:230px;flex:0 0 auto}
 .flip-scene{width:min(88vw,720px)}
@@ -707,16 +715,16 @@ const fontOptions = computed(() => [
   .filter((font) => font !== SYSTEM_DEFAULT_FONT)
   .sort((a, b) => a.localeCompare(b)));
 const fontStatus = computed(() => {
-  if (isFontLoading.value) return "正在读取本机字体…";
+  if (isFontLoading.value) return t("正在读取本机字体…", "Reading local fonts…");
   if (fontLoadError.value) return fontLoadError.value;
   const sourceLabel = {
-    native: "本机字体",
-    browser: "浏览器可访问字体",
-    canvas: "浏览器检测字体",
-    cache: "缓存字体",
-    fallback: "常用字体",
+    native: t("本机字体", "local fonts"),
+    browser: t("浏览器可访问字体", "browser-accessible fonts"),
+    canvas: t("浏览器检测字体", "fonts detected by the browser"),
+    cache: t("缓存字体", "cached fonts"),
+    fallback: t("常用字体", "common fonts"),
   }[fontSource.value];
-  return `已获取 ${systemFontList.value.length} 种${sourceLabel}`;
+  return t(`已获取 ${systemFontList.value.length} 种${sourceLabel}`, `Found ${systemFontList.value.length} ${sourceLabel}`);
 });
 
 function activateEditorEntry() {
@@ -764,45 +772,45 @@ onDeactivated(() => {
     <div class="editor-body">
       <section class="form-section">
         <header class="section-heading">
-          <h2>内容</h2>
-          <p>选择载体并编辑要寄出的文字或图片。</p>
+          <h2>{{ t("内容", "Content") }}</h2>
+          <p>{{ t("选择载体并编辑要寄出的文字或图片。", "Choose a format and edit the text or images for your letter.") }}</p>
         </header>
 
         <div class="form-grid">
           <div class="field">
-            <label>类型</label>
+            <label>{{ t("类型", "Format") }}</label>
             <select v-model="form.type" @change="onTypeChange">
-              <option value="envelope">信封</option>
-              <option value="postcard">明信片</option>
-              <option value="letter">信纸</option>
+              <option value="envelope">{{ t("信封", "Envelope") }}</option>
+              <option value="postcard">{{ t("明信片", "Postcard") }}</option>
+              <option value="letter">{{ t("信纸", "Letter sheet") }}</option>
             </select>
           </div>
           <div class="field">
-            <label>标题 ({{ form.title.length }}/{{ MAX.title }})</label>
+            <label>{{ t("标题", "Title") }} ({{ form.title.length }}/{{ MAX.title }})</label>
             <input v-model="form.title" :maxlength="MAX.title" />
           </div>
           <div class="field field-wide">
-            <label>备注（可选）</label>
-            <textarea v-model="form.note" rows="2" placeholder="给这封信加备注，例如：给妈妈的节日祝福"></textarea>
+            <label>{{ t("备注（可选）", "Note (optional)") }}</label>
+            <textarea v-model="form.note" rows="2" :placeholder="t('给这封信加备注，例如：给妈妈的节日祝福', 'Add a note, e.g. a holiday greeting for Mom')"></textarea>
           </div>
           <div v-if="form.type === 'envelope' || form.type === 'letter'" class="field field-wide">
-            <label>{{ form.type === 'letter' ? '信纸正文' : '信纸内容' }}（{{ form.message.length }} 字）</label>
-            <div class="rich-toolbar" role="toolbar" aria-label="正文格式">
-              <button type="button" aria-label="加粗" title="加粗" :class="{ active: activeRichFormats.bold }" :aria-pressed="activeRichFormats.bold" @mousedown.prevent @click="formatRichText('message', 'bold')"><strong>B</strong></button>
-              <button type="button" aria-label="斜体" title="斜体" :class="{ active: activeRichFormats.italic }" :aria-pressed="activeRichFormats.italic" @mousedown.prevent @click="formatRichText('message', 'italic')"><em>I</em></button>
-              <button type="button" aria-label="下划线" title="下划线" :class="{ active: activeRichFormats.underline }" :aria-pressed="activeRichFormats.underline" @mousedown.prevent @click="formatRichText('message', 'underline')"><u>U</u></button>
-              <button type="button" aria-label="项目符号列表" title="项目符号列表" :class="{ active: activeRichFormats.unorderedList }" :aria-pressed="activeRichFormats.unorderedList" @mousedown.prevent @click="formatRichText('message', 'insertUnorderedList')">• 列表</button>
-              <button type="button" aria-label="编号列表" title="编号列表" :class="{ active: activeRichFormats.orderedList }" :aria-pressed="activeRichFormats.orderedList" @mousedown.prevent @click="formatRichText('message', 'insertOrderedList')">1. 列表</button>
-              <button type="button" aria-label="清除格式" title="清除选中文本的格式" @mousedown.prevent @click="clearRichFormatting('message')">清除格式</button>
+            <label>{{ form.type === 'letter' ? t('信纸正文', 'Letter text') : t('信纸内容', 'Letter content') }}（{{ t(`${form.message.length} 字`, `${form.message.length} characters`) }}）</label>
+            <div class="rich-toolbar" role="toolbar" :aria-label="t('正文格式', 'Text formatting')">
+              <button type="button" :aria-label="t('加粗', 'Bold')" :title="t('加粗', 'Bold')" :class="{ active: activeRichFormats.bold }" :aria-pressed="activeRichFormats.bold" @mousedown.prevent @click="formatRichText('message', 'bold')"><strong>B</strong></button>
+              <button type="button" :aria-label="t('斜体', 'Italic')" :title="t('斜体', 'Italic')" :class="{ active: activeRichFormats.italic }" :aria-pressed="activeRichFormats.italic" @mousedown.prevent @click="formatRichText('message', 'italic')"><em>I</em></button>
+              <button type="button" :aria-label="t('下划线', 'Underline')" :title="t('下划线', 'Underline')" :class="{ active: activeRichFormats.underline }" :aria-pressed="activeRichFormats.underline" @mousedown.prevent @click="formatRichText('message', 'underline')"><u>U</u></button>
+              <button type="button" :aria-label="t('项目符号列表', 'Bulleted list')" :title="t('项目符号列表', 'Bulleted list')" :class="{ active: activeRichFormats.unorderedList }" :aria-pressed="activeRichFormats.unorderedList" @mousedown.prevent @click="formatRichText('message', 'insertUnorderedList')">• {{ t("列表", "List") }}</button>
+              <button type="button" :aria-label="t('编号列表', 'Numbered list')" :title="t('编号列表', 'Numbered list')" :class="{ active: activeRichFormats.orderedList }" :aria-pressed="activeRichFormats.orderedList" @mousedown.prevent @click="formatRichText('message', 'insertOrderedList')">1. {{ t("列表", "List") }}</button>
+              <button type="button" :aria-label="t('清除格式', 'Clear formatting')" :title="t('清除选中文本的格式', 'Clear formatting from selected text')" @mousedown.prevent @click="clearRichFormatting('message')">{{ t("清除格式", "Clear formatting") }}</button>
             </div>
             <div
               ref="messageEditor"
               class="rich-editor rich-text-body"
               contenteditable="true"
               role="textbox"
-              aria-label="信纸正文"
+              :aria-label="t('信纸正文', 'Letter text')"
               aria-multiline="true"
-              data-placeholder="在这里写下信件内容…"
+              :data-placeholder="t('在这里写下信件内容…', 'Write your letter here…')"
               @input="onRichTextInput('message', $event)"
               @focus="setActiveRichEditor"
               @keyup="refreshRichFormatting"
@@ -810,45 +818,45 @@ onDeactivated(() => {
             ></div>
             <div v-if="form.type === 'letter'" class="sticker-tools">
               <label class="btn-secondary">
-                上传信纸贴纸
+                {{ t("上传信纸贴纸", "Upload letter stickers") }}
                 <input type="file" accept="image/*" multiple hidden @change="uploadStickers" />
               </label>
-              <span>贴纸可拖动；选中后用角点缩放、上方控制点旋转。</span>
+              <span>{{ t("贴纸可拖动；选中后用角点缩放、上方控制点旋转。", "Drag stickers to move them. Select one to resize with a corner handle or rotate with the top handle.") }}</span>
             </div>
           </div>
           <div v-if="form.type === 'postcard'" class="field field-wide">
-            <label>明信片图片</label>
+            <label>{{ t("明信片图片", "Postcard image") }}</label>
             <div class="image-row">
               <label class="btn-secondary">
-                上传图片
+                {{ t("上传图片", "Upload image") }}
                 <input type="file" accept="image/*" @change="onCardImage" hidden />
               </label>
-              <button v-if="form.cardImage" class="btn-secondary" @click="clearCardImage">清除图片</button>
+              <button v-if="form.cardImage" class="btn-secondary" @click="clearCardImage">{{ t("清除图片", "Remove image") }}</button>
             </div>
             <img v-if="form.cardImage" :src="form.cardImage" class="image-preview" alt="" />
           </div>
           <div v-if="form.type === 'postcard'" class="field">
-            <label>正面文字 ({{ form.caption.length }}/{{ MAX.caption }})</label>
+            <label>{{ t("正面文字", "Front text") }} ({{ form.caption.length }}/{{ MAX.caption }})</label>
             <input v-model="form.caption" :maxlength="MAX.caption" />
           </div>
           <div v-if="form.type === 'postcard'" class="field field-wide">
-            <label>背面文字（{{ form.backCaption.length }} 字）</label>
-            <div class="rich-toolbar" role="toolbar" aria-label="背面文字格式">
-              <button type="button" aria-label="加粗" title="加粗" :class="{ active: activeRichFormats.bold }" :aria-pressed="activeRichFormats.bold" @mousedown.prevent @click="formatRichText('backCaption', 'bold')"><strong>B</strong></button>
-              <button type="button" aria-label="斜体" title="斜体" :class="{ active: activeRichFormats.italic }" :aria-pressed="activeRichFormats.italic" @mousedown.prevent @click="formatRichText('backCaption', 'italic')"><em>I</em></button>
-              <button type="button" aria-label="下划线" title="下划线" :class="{ active: activeRichFormats.underline }" :aria-pressed="activeRichFormats.underline" @mousedown.prevent @click="formatRichText('backCaption', 'underline')"><u>U</u></button>
-              <button type="button" aria-label="项目符号列表" title="项目符号列表" :class="{ active: activeRichFormats.unorderedList }" :aria-pressed="activeRichFormats.unorderedList" @mousedown.prevent @click="formatRichText('backCaption', 'insertUnorderedList')">• 列表</button>
-              <button type="button" aria-label="编号列表" title="编号列表" :class="{ active: activeRichFormats.orderedList }" :aria-pressed="activeRichFormats.orderedList" @mousedown.prevent @click="formatRichText('backCaption', 'insertOrderedList')">1. 列表</button>
-              <button type="button" aria-label="清除格式" title="清除选中文本的格式" @mousedown.prevent @click="clearRichFormatting('backCaption')">清除格式</button>
+            <label>{{ t("背面文字", "Back text") }}（{{ t(`${form.backCaption.length} 字`, `${form.backCaption.length} characters`) }}）</label>
+            <div class="rich-toolbar" role="toolbar" :aria-label="t('背面文字格式', 'Back text formatting')">
+              <button type="button" :aria-label="t('加粗', 'Bold')" :title="t('加粗', 'Bold')" :class="{ active: activeRichFormats.bold }" :aria-pressed="activeRichFormats.bold" @mousedown.prevent @click="formatRichText('backCaption', 'bold')"><strong>B</strong></button>
+              <button type="button" :aria-label="t('斜体', 'Italic')" :title="t('斜体', 'Italic')" :class="{ active: activeRichFormats.italic }" :aria-pressed="activeRichFormats.italic" @mousedown.prevent @click="formatRichText('backCaption', 'italic')"><em>I</em></button>
+              <button type="button" :aria-label="t('下划线', 'Underline')" :title="t('下划线', 'Underline')" :class="{ active: activeRichFormats.underline }" :aria-pressed="activeRichFormats.underline" @mousedown.prevent @click="formatRichText('backCaption', 'underline')"><u>U</u></button>
+              <button type="button" :aria-label="t('项目符号列表', 'Bulleted list')" :title="t('项目符号列表', 'Bulleted list')" :class="{ active: activeRichFormats.unorderedList }" :aria-pressed="activeRichFormats.unorderedList" @mousedown.prevent @click="formatRichText('backCaption', 'insertUnorderedList')">• {{ t("列表", "List") }}</button>
+              <button type="button" :aria-label="t('编号列表', 'Numbered list')" :title="t('编号列表', 'Numbered list')" :class="{ active: activeRichFormats.orderedList }" :aria-pressed="activeRichFormats.orderedList" @mousedown.prevent @click="formatRichText('backCaption', 'insertOrderedList')">1. {{ t("列表", "List") }}</button>
+              <button type="button" :aria-label="t('清除格式', 'Clear formatting')" :title="t('清除选中文本的格式', 'Clear formatting from selected text')" @mousedown.prevent @click="clearRichFormatting('backCaption')">{{ t("清除格式", "Clear formatting") }}</button>
             </div>
             <div
               ref="backCaptionEditor"
               class="rich-editor rich-text-body"
               contenteditable="true"
               role="textbox"
-              aria-label="明信片背面文字"
+              :aria-label="t('明信片背面文字', 'Postcard back text')"
               aria-multiline="true"
-              data-placeholder="翻面后在这里写…"
+              :data-placeholder="t('翻面后在这里写…', 'Flip the postcard and write here…')"
               @input="onRichTextInput('backCaption', $event)"
               @focus="setActiveRichEditor"
               @keyup="refreshRichFormatting"
@@ -860,43 +868,43 @@ onDeactivated(() => {
 
       <section class="form-section">
         <header class="section-heading">
-          <h2>排版</h2>
-          <p>字体只从本机读取，不会上传到网络。</p>
+          <h2>{{ t("排版", "Typography") }}</h2>
+          <p>{{ t("字体只从本机读取，不会上传到网络。", "Fonts are read from this device only and are never uploaded.") }}</p>
         </header>
         <div class="font-status-row">
           <p class="font-status" :class="{ 'font-status-error': fontLoadError }" role="status" aria-live="polite">{{ fontStatus }}</p>
           <button class="font-refresh" type="button" :disabled="isFontLoading" @click="refreshSystemFonts">
-            {{ isFontLoading ? "读取中…" : "刷新字体" }}
+            {{ isFontLoading ? t("读取中…", "Loading…") : t("刷新字体", "Refresh fonts") }}
           </button>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label>标题字体</label>
+            <label>{{ t("标题字体", "Title font") }}</label>
             <FontSelect v-model="form.titleFont" :fonts="fontOptions" />
           </div>
           <div class="field">
-            <label>{{ form.type === 'postcard' ? '正面文字字体' : '正文/信纸字体' }}</label>
+            <label>{{ form.type === 'postcard' ? t('正面文字字体', 'Front text font') : t('正文/信纸字体', 'Message font') }}</label>
             <FontSelect v-if="form.type === 'postcard'" v-model="form.captionFont" :fonts="fontOptions" />
             <FontSelect v-else v-model="form.messageFont" :fonts="fontOptions" />
           </div>
           <div v-if="form.type === 'postcard'" class="field">
-            <label>背面文字字体</label>
+            <label>{{ t("背面文字字体", "Back text font") }}</label>
             <FontSelect v-model="form.backCaptionFont" :fonts="fontOptions" />
           </div>
           <div class="field">
-            <label>信件内容字号：{{ form.fontSize }}px</label>
+            <label>{{ t("信件内容字号", "Letter font size") }}: {{ form.fontSize }}px</label>
             <input type="range" min="14" max="36" v-model.number="form.fontSize" />
           </div>
           <div v-if="form.type !== 'letter'" class="field">
-            <label>寄件人字体</label>
+            <label>{{ t("寄件人字体", "Sender font") }}</label>
             <FontSelect v-model="form.fromFont" :fonts="fontOptions" />
           </div>
           <div v-if="form.type !== 'letter'" class="field">
-            <label>收件人字体</label>
+            <label>{{ t("收件人字体", "Recipient font") }}</label>
             <FontSelect v-model="form.toFont" :fonts="fontOptions" />
           </div>
           <div v-if="form.type !== 'letter'" class="field">
-            <label>邮票字体</label>
+            <label>{{ t("邮票字体", "Stamp font") }}</label>
             <FontSelect v-model="form.stampFont" :fonts="fontOptions" />
           </div>
         </div>
@@ -904,30 +912,30 @@ onDeactivated(() => {
 
       <section v-if="form.type !== 'letter'" class="form-section">
         <header class="section-heading">
-          <h2>邮寄信息</h2>
-          <p>设置收件人与邮票样式。</p>
+          <h2>{{ t("邮寄信息", "Mailing details") }}</h2>
+          <p>{{ t("设置收件人与邮票样式。", "Set the recipient and stamp style.") }}</p>
         </header>
         <div class="form-grid">
           <div class="field">
-            <label>寄件人 ({{ form.from.length }}/{{ MAX.from }})</label>
+            <label>{{ t("寄件人", "Sender") }} ({{ form.from.length }}/{{ MAX.from }})</label>
             <input v-model="form.from" :maxlength="MAX.from" />
           </div>
           <div class="field">
-            <label>收件人 ({{ form.to.length }}/{{ MAX.to }})</label>
+            <label>{{ t("收件人", "Recipient") }} ({{ form.to.length }}/{{ MAX.to }})</label>
             <input v-model="form.to" :maxlength="MAX.to" />
           </div>
           <div class="field">
-            <label>邮票文字 ({{ form.stampText.length }}/{{ MAX.stampText }})</label>
-            <input v-model="form.stampText" :maxlength="MAX.stampText" placeholder="邮票文字" />
+            <label>{{ t("邮票文字", "Stamp text") }} ({{ form.stampText.length }}/{{ MAX.stampText }})</label>
+            <input v-model="form.stampText" :maxlength="MAX.stampText" :placeholder="t('邮票文字', 'Stamp text')" />
           </div>
           <div class="field">
-            <label>邮票图片</label>
+            <label>{{ t("邮票图片", "Stamp image") }}</label>
             <div class="image-row">
               <label class="btn-secondary">
-                选择图片
+                {{ t("选择图片", "Choose image") }}
                 <input type="file" accept="image/*" @change="onStampImage" hidden />
               </label>
-              <button v-if="form.stampImage" class="btn-secondary" @click="clearStampImage">移除</button>
+              <button v-if="form.stampImage" class="btn-secondary" @click="clearStampImage">{{ t("移除", "Remove") }}</button>
             </div>
             <div v-if="form.stampImage" class="stamp-preview">
               <img :src="form.stampImage" alt="" />
@@ -938,50 +946,50 @@ onDeactivated(() => {
 
       <section class="form-section">
         <header class="section-heading">
-          <h2>外观</h2>
-          <p>调整信纸或明信片的颜色与边框。</p>
+          <h2>{{ t("外观", "Appearance") }}</h2>
+          <p>{{ t("调整信纸或明信片的颜色与边框。", "Adjust the colors and border of the letter sheet or postcard.") }}</p>
         </header>
         <div class="form-grid">
           <div class="field">
-            <label>背景色</label>
+            <label>{{ t("背景色", "Background color") }}</label>
             <input type="color" v-model="form.bgColor" />
           </div>
           <div class="field">
-            <label>文字颜色</label>
+            <label>{{ t("文字颜色", "Text color") }}</label>
             <input type="color" v-model="form.textColor" />
           </div>
           <div class="field">
-            <label>边框样式</label>
+            <label>{{ t("边框样式", "Border style") }}</label>
             <select v-model="form.borderStyle">
-              <option value="solid">实线</option>
-              <option value="dashed">虚线</option>
-              <option value="double">双线</option>
-              <option value="dotted">点线</option>
+              <option value="solid">{{ t("实线", "Solid") }}</option>
+              <option value="dashed">{{ t("虚线", "Dashed") }}</option>
+              <option value="double">{{ t("双线", "Double") }}</option>
+              <option value="dotted">{{ t("点线", "Dotted") }}</option>
             </select>
           </div>
           <div class="field">
-            <label>边框颜色</label>
+            <label>{{ t("边框颜色", "Border color") }}</label>
             <input type="color" v-model="form.borderColor" />
           </div>
         </div>
       </section>
 
       <div class="actions">
-        <button class="btn-primary" @click="handleSave">保存</button>
-        <button class="btn-secondary" @click="resetForm">重置</button>
-        <button class="btn-primary" @click="exportHTML" :disabled="exportBusy">{{ exportBusy ? "正在导出…" : "导出 HTML" }}</button>
+        <button class="btn-primary" @click="handleSave">{{ t("保存", "Save") }}</button>
+        <button class="btn-secondary" @click="resetForm">{{ t("重置", "Reset") }}</button>
+        <button class="btn-primary" @click="exportHTML" :disabled="exportBusy">{{ exportBusy ? t("正在导出…", "Exporting…") : t("导出 HTML", "Export HTML") }}</button>
       </div>
     </div>
 
     <div class="preview-section">
       <div class="preview-heading">
-        <h3>预览 <span>· {{ form.type === 'envelope' ? (!isOpened ? '点击打开信封' : !isExpanded ? '再次点击抽出信纸' : '点击收起信纸') : form.type === 'postcard' ? '点击明信片翻面' : '单面信纸' }}</span></h3>
-        <span class="resize-label">拖动调整大小</span>
+        <h3>{{ t("预览", "Preview") }} <span>· {{ form.type === 'envelope' ? (!isOpened ? t('点击打开信封', 'Click to open the envelope') : !isExpanded ? t('再次点击抽出信纸', 'Click again to pull out the letter') : t('点击收起信纸', 'Click to put away the letter')) : form.type === 'postcard' ? t('点击明信片翻面', 'Click to flip the postcard') : t('单面信纸', 'Single-sided letter sheet') }}</span></h3>
+        <span class="resize-label">{{ t("拖动调整大小", "Drag to resize") }}</span>
       </div>
       <div
         class="preview-resize-handle"
         role="separator"
-        aria-label="拖动调整预览窗口大小"
+        :aria-label="t('拖动调整预览窗口大小', 'Drag to resize the preview')"
         aria-orientation="vertical"
         :aria-valuenow="Math.round(previewWidth)"
         aria-valuemin="34"
@@ -1012,7 +1020,7 @@ onDeactivated(() => {
             </div>
             <div class="address-area" :style="{ fontFamily: form.toFont }">
               <span class="to-label">TO:</span>
-              <span class="name-text">{{ form.to.replace('致：', '') }}</span>
+              <span class="name-text">{{ form.to.replace(/^(致：|To:\s*)/, '') }}</span>
             </div>
           </div>
           <div class="envelope-flap"></div>
@@ -1041,7 +1049,7 @@ onDeactivated(() => {
             transform: `rotate(${sticker.rotation}deg)`,
           }"
           tabindex="0"
-          :aria-label="`信纸贴纸，位置 ${Math.round(sticker.x)}%，大小 ${Math.round(sticker.width)}%，旋转 ${Math.round(sticker.rotation)} 度`"
+          :aria-label="t(`信纸贴纸，位置 ${Math.round(sticker.x)}%，大小 ${Math.round(sticker.width)}%，旋转 ${Math.round(sticker.rotation)} 度`, `Letter sticker, position ${Math.round(sticker.x)}%, size ${Math.round(sticker.width)}%, rotation ${Math.round(sticker.rotation)} degrees`)"
           @pointerdown="beginStickerInteraction('move', sticker, $event)"
           @click.stop="selectedStickerId = sticker.id"
           @keydown.delete.prevent="removeSticker(sticker.id)"
@@ -1051,22 +1059,22 @@ onDeactivated(() => {
               <button
               class="sticker-control sticker-rotate"
               type="button"
-              aria-label="旋转贴纸"
-              title="拖动旋转"
+              :aria-label="t('旋转贴纸', 'Rotate sticker')"
+              :title="t('拖动旋转', 'Drag to rotate')"
               @pointerdown.stop="beginStickerInteraction('rotate', sticker, $event)"
               >↻</button>
               <button
               class="sticker-control sticker-resize"
               type="button"
-              aria-label="调整贴纸大小"
-              title="拖动缩放"
+              :aria-label="t('调整贴纸大小', 'Resize sticker')"
+              :title="t('拖动缩放', 'Drag to resize')"
               @pointerdown.stop="beginStickerInteraction('resize', sticker, $event)"
               ></button>
               <button
               class="sticker-control sticker-remove"
               type="button"
-              aria-label="移除贴纸"
-              title="移除贴纸"
+              :aria-label="t('移除贴纸', 'Remove sticker')"
+              :title="t('移除贴纸', 'Remove sticker')"
               @pointerdown.stop
               @click.stop="removeSticker(sticker.id)"
               >×</button>
@@ -1082,7 +1090,7 @@ onDeactivated(() => {
             <div class="card-image-frame">
               <div class="card-image-wrap">
                 <img v-if="form.cardImage" :src="form.cardImage" alt="" />
-                <div v-else class="image-placeholder">点击上传图片</div>
+                <div v-else class="image-placeholder">{{ t("点击上传图片", "Click to upload an image") }}</div>
               </div>
             </div>
             <div class="card-caption-front">
@@ -1113,18 +1121,18 @@ onDeactivated(() => {
       </div>
 
       <div class="toolbar-bottom">
-        <button v-if="form.type === 'envelope'" @click="isOpened ? resetMail() : handleStageClick()">{{ isOpened ? '重新封装' : '打开信纸' }}</button>
+        <button v-if="form.type === 'envelope'" @click="isOpened ? resetMail() : handleStageClick()">{{ isOpened ? t("重新封装", "Close envelope") : t("打开信纸", "Open letter") }}</button>
       </div>
 
       <footer class="hint-bar">
         <span v-if="form.type === 'envelope'">
-          <span v-if="!isOpened">点击信封或按钮打开信封</span>
-          <span v-else-if="!isExpanded">信封已打开，再次点击抽出信纸</span>
-          <span v-else>点击信纸将其放回并合上信封</span>
+          <span v-if="!isOpened">{{ t("点击信封或按钮打开信封", "Click the envelope or button to open it") }}</span>
+          <span v-else-if="!isExpanded">{{ t("信封已打开，再次点击抽出信纸", "Envelope opened. Click again to pull out the letter") }}</span>
+          <span v-else>{{ t("点击信纸将其放回并合上信封", "Click the letter to return it and close the envelope") }}</span>
         </span>
         <span v-else-if="form.type === 'postcard'">
-          <span v-if="!isFlipped">点击明信片翻面查看文字</span>
-          <span v-else>点击明信片翻回图片</span>
+          <span v-if="!isFlipped">{{ t("点击明信片翻面查看文字", "Flip the postcard to read the message") }}</span>
+          <span v-else>{{ t("点击明信片翻回图片", "Flip the postcard back to the image") }}</span>
         </span>
       </footer>
     </div>

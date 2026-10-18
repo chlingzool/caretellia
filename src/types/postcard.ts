@@ -52,4 +52,5 @@ export interface AppSettings {
   uiFontSize: number;
   exportDirectory: string;
   exportColorMode: "light" | "dark" | "system";
+  locale: "system" | "zh" | "en";
 }

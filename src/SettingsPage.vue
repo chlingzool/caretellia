@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { DEFAULT_FONT_FAMILIES, SYSTEM_DEFAULT_FONT, useSystemFonts } from "./composables/useSystemFonts";
+import { t } from "./i18n";
 import type { AppSettings } from "./types/postcard";
 
 const props = defineProps<{
@@ -13,13 +14,14 @@ const emit = defineEmits<{
   (event: "browse-export-directory"): void;
 }>();
 
-const sections = [
-  { id: "settings-interface", label: "界面外观" },
-  { id: "settings-export", label: "导出位置" },
-  { id: "settings-storage", label: "数据与隐私" },
-] as const;
+const sections = computed(() => [
+  { id: "settings-interface", label: t("界面外观", "Appearance") },
+  { id: "settings-export", label: t("导出位置", "Export location") },
+  { id: "settings-storage", label: t("数据与隐私", "Data & privacy") },
+] as const);
 
-const activeSection = ref<(typeof sections)[number]["id"]>("settings-interface");
+type SettingsSectionId = "settings-interface" | "settings-export" | "settings-storage";
+const activeSection = ref<SettingsSectionId>("settings-interface");
 const {
   systemFontList,
   isLoading: isFontLoading,
@@ -32,7 +34,7 @@ const fontOptions = computed(() => {
     .filter((family) => family !== SYSTEM_DEFAULT_FONT)
     .sort((a, b) => a.localeCompare(b));
   return [SYSTEM_DEFAULT_FONT, ...families].map((family) => ({
-    label: family === SYSTEM_DEFAULT_FONT ? "系统默认" : family,
+    label: family === SYSTEM_DEFAULT_FONT ? t("系统默认", "System default") : family,
     value: family === SYSTEM_DEFAULT_FONT
       ? SYSTEM_DEFAULT_FONT
       : `"${family.replace(/["\\]/g, "\\$&")}", sans-serif`,
@@ -42,23 +44,23 @@ const currentFontIsListed = computed(() =>
   fontOptions.value.some((font) => font.value === props.settings.uiFont),
 );
 const fontStatus = computed(() => {
-  if (isFontLoading.value) return "正在读取本机字体…";
+  if (isFontLoading.value) return t("正在读取本机字体…", "Reading local fonts…");
   if (fontLoadError.value) return fontLoadError.value;
   const source = {
-    native: "本机字体",
-    browser: "浏览器可访问字体",
-    canvas: "浏览器检测字体",
-    cache: "字体缓存",
-    fallback: "常用字体",
+    native: t("本机字体", "local fonts"),
+    browser: t("浏览器可访问字体", "browser-accessible fonts"),
+    canvas: t("浏览器检测字体", "fonts detected by the browser"),
+    cache: t("字体缓存", "cached fonts"),
+    fallback: t("常用字体", "common fonts"),
   }[fontSource.value];
-  return `已读取 ${systemFontList.value.length} 种${source}`;
+  return t(`已读取 ${systemFontList.value.length} 种${source}`, `Found ${systemFontList.value.length} ${source}`);
 });
 
 function updateSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K], settings: AppSettings) {
   emit("update:settings", { ...settings, [key]: value });
 }
 
-function navigateToSection(id: (typeof sections)[number]["id"]) {
+function navigateToSection(id: SettingsSectionId) {
   activeSection.value = id;
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -67,13 +69,13 @@ function navigateToSection(id: (typeof sections)[number]["id"]) {
 <template>
   <section class="settings-page">
     <header class="settings-heading">
-      <p class="eyebrow">应用偏好</p>
-      <h1>设置</h1>
-      <p>调整工作区的显示方式和文件保存位置。</p>
+      <p class="eyebrow">{{ t("应用偏好", "Preferences") }}</p>
+      <h1>{{ t("设置", "Settings") }}</h1>
+      <p>{{ t("调整工作区的显示方式和文件保存位置。", "Customize the workspace and where files are saved.") }}</p>
     </header>
 
     <div class="settings-layout">
-      <nav class="settings-nav" aria-label="设置栏目">
+      <nav class="settings-nav" :aria-label="t('设置栏目', 'Settings sections')">
         <button
           v-for="section in sections"
           :key="section.id"
@@ -85,26 +87,35 @@ function navigateToSection(id: (typeof sections)[number]["id"]) {
 
       <div class="settings-content">
         <section id="settings-interface" class="settings-section">
-          <h2>界面外观</h2>
-          <p class="section-description">设置仅影响应用界面，不会改变信件内容中的字体。</p>
+          <h2>{{ t("界面外观", "Appearance") }}</h2>
+          <p class="section-description">{{ t("设置仅影响应用界面，不会改变信件内容中的字体。", "These settings affect the app interface only, not the fonts in your letters.") }}</p>
 
           <label class="setting-row">
-            <span class="setting-copy"><strong>界面字体</strong><small>使用之前检测到的本机字体列表</small></span>
+            <span class="setting-copy"><strong>{{ t("显示语言", "Display language") }}</strong><small>{{ t("选择应用界面语言", "Choose the language used throughout the app") }}</small></span>
+            <select :value="settings.locale" @change="updateSetting('locale', ($event.target as HTMLSelectElement).value as AppSettings['locale'], settings)">
+              <option value="system">{{ t("跟随系统", "Follow system") }}</option>
+              <option value="zh">简体中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+
+          <label class="setting-row">
+            <span class="setting-copy"><strong>{{ t("界面字体", "Interface font") }}</strong><small>{{ t("使用之前检测到的本机字体列表", "Choose from fonts detected on this device") }}</small></span>
             <span class="font-select-wrap">
               <select :value="settings.uiFont" @change="updateSetting('uiFont', ($event.target as HTMLSelectElement).value, settings)">
-                <option :value="SYSTEM_DEFAULT_FONT">系统默认</option>
-                <option v-if="!currentFontIsListed" :value="settings.uiFont">当前字体</option>
+                <option :value="SYSTEM_DEFAULT_FONT">{{ t("系统默认", "System default") }}</option>
+                <option v-if="!currentFontIsListed" :value="settings.uiFont">{{ t("当前字体", "Current font") }}</option>
                 <option v-for="font in fontOptions.slice(1)" :key="font.value" :value="font.value">{{ font.label }}</option>
               </select>
               <span class="font-list-status" role="status" aria-live="polite">{{ fontStatus }}</span>
               <button type="button" class="font-refresh" :disabled="isFontLoading" @click="refreshSystemFonts">
-                {{ isFontLoading ? "读取中…" : "刷新字体" }}
+                {{ isFontLoading ? t("读取中…", "Loading…") : t("刷新字体", "Refresh fonts") }}
               </button>
             </span>
           </label>
 
           <label class="setting-row">
-            <span class="setting-copy"><strong>界面字体大小</strong><small>调整整个应用界面的基准字号</small></span>
+            <span class="setting-copy"><strong>{{ t("界面字体大小", "Interface font size") }}</strong><small>{{ t("调整整个应用界面的基准字号", "Adjust the base text size across the app") }}</small></span>
             <span class="font-size-control">
               <input
                 type="range"
@@ -120,38 +131,38 @@ function navigateToSection(id: (typeof sections)[number]["id"]) {
         </section>
 
         <section id="settings-export" class="settings-section">
-          <h2>导出位置</h2>
-          <p class="section-description">选择导出的 HTML 文件默认保存到哪个文件夹。</p>
+          <h2>{{ t("导出位置", "Export location") }}</h2>
+          <p class="section-description">{{ t("选择导出的 HTML 文件默认保存到哪个文件夹。", "Choose the default folder for exported HTML files.") }}</p>
 
-          <label class="setting-copy" for="export-directory"><strong>默认文件夹</strong></label>
+          <label class="setting-copy" for="export-directory"><strong>{{ t("默认文件夹", "Default folder") }}</strong></label>
           <div class="directory-control">
             <input
               id="export-directory"
               :value="settings.exportDirectory"
               type="text"
-              placeholder="未设置时保存到应用数据目录"
+              :placeholder="t('未设置时保存到应用数据目录', 'Uses the app data folder when not set')"
               @input="updateSetting('exportDirectory', ($event.target as HTMLInputElement).value, settings)"
             />
-            <button type="button" class="browse-button" @click="emit('browse-export-directory')">浏览…</button>
+            <button type="button" class="browse-button" @click="emit('browse-export-directory')">{{ t("浏览…", "Browse…") }}</button>
           </div>
-          <p class="setting-hint">路径仅保存在本机。留空时使用应用默认导出目录。</p>
+          <p class="setting-hint">{{ t("路径仅保存在本机。留空时使用应用默认导出目录。", "The path is stored locally. Leave it blank to use the default export folder.") }}</p>
           <label class="setting-row export-mode-row">
-            <span class="setting-copy"><strong>导出页面配色</strong><small>只改变导出页面背景和标题，不改变信件设计本身</small></span>
+            <span class="setting-copy"><strong>{{ t("导出页面配色", "Export page theme") }}</strong><small>{{ t("只改变导出页面背景和标题，不改变信件设计本身", "Changes the export page background and title only, not the letter design") }}</small></span>
             <select
               :value="settings.exportColorMode"
               @change="updateSetting('exportColorMode', ($event.target as HTMLSelectElement).value as AppSettings['exportColorMode'], settings)"
             >
-              <option value="light">浅色</option>
-              <option value="dark">深色</option>
-              <option value="system">跟随系统</option>
+              <option value="light">{{ t("浅色", "Light") }}</option>
+              <option value="dark">{{ t("深色", "Dark") }}</option>
+              <option value="system">{{ t("跟随系统", "System") }}</option>
             </select>
           </label>
           <p v-if="exportDirectoryError" class="setting-error" role="alert">{{ exportDirectoryError }}</p>
         </section>
 
         <section id="settings-storage" class="settings-section">
-          <h2>数据与隐私</h2>
-          <p class="section-description">信件与界面偏好保存在本机浏览器存储中，不会上传到网络。</p>
+          <h2>{{ t("数据与隐私", "Data & privacy") }}</h2>
+          <p class="section-description">{{ t("信件与界面偏好保存在本机浏览器存储中，不会上传到网络。", "Letters and preferences are stored in this browser on your device and are never uploaded.") }}</p>
         </section>
       </div>
     </div>

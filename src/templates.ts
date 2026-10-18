@@ -1,4 +1,5 @@
 import type { LetterTemplate } from "./types/postcard";
+import type { AppLocale } from "./i18n";
 
 export const letterTemplates: LetterTemplate[] = [
   {
@@ -133,3 +134,108 @@ export const letterTemplates: LetterTemplate[] = [
     },
   },
 ];
+
+const englishTemplates: Record<string, Pick<LetterTemplate, "label" | "description"> & {
+  data: Partial<LetterTemplate["data"]>;
+}> = {
+  birthday: {
+    label: "Birthday wishes",
+    description: "Turn birthday wishes into a warm keepsake postcard.",
+    data: {
+      title: "Happy Birthday",
+      caption: "Make every day sparkle",
+      backCaption: "May every moment be treasured, today and always. Wishing you a life as sweet as can be.",
+      from: "From: Me",
+      to: "To: Someone special",
+      message: "Dear friend,\n\nWishing you a day and a year filled with surprises and warmth.\n\nThank you for being by my side. Happy birthday—you are always loved and cherished.",
+    },
+  },
+  festival: {
+    label: "Season's greetings",
+    description: "Send a bright greeting for the season.",
+    data: {
+      title: "Happy New Year",
+      caption: "May the year ahead be brighter",
+      backCaption: "May the new year bring your hopes to life, your wishes come true, and peace and joy to every day.",
+      from: "From: Me",
+      to: "To: Dear you",
+      message: "Dear friend,\n\nA new year is here. May you find good cheer and good news, and may your wishes come true.\n\nMy companionship and best wishes are sent with all my heart.",
+    },
+  },
+  gratitude: {
+    label: "A thank-you note",
+    description: "Express your gratitude simply and sincerely.",
+    data: {
+      title: "Thank You",
+      caption: "Thank you for being here",
+      backCaption: "Thank you for being there for me through every season of life. You have made this journey warmer and more meaningful.",
+      from: "From: Me",
+      to: "To: You",
+      message: "Dear friend,\n\nI'm so glad we made it this far together.\n\nThank you for your company, encouragement, and understanding. I will always remember it.",
+    },
+  },
+  "aged-letter": {
+    label: "A vintage letter",
+    description: "Warm sepia paper, a postmark, and the feel of handwritten correspondence.",
+    data: {
+      title: "A letter from long ago",
+      message: "Dear friend,\n\nAs I write, rain is falling outside. I think of the days we spent together, and they still warm my heart.\n\nMay this letter carry my greetings to you.",
+      from: "From: An old friend",
+      to: "To: Dear you",
+      note: "Vintage letter template",
+    },
+  },
+  "travel-letter": {
+    label: "A letter from afar",
+    description: "A romantic note from a journey, with a softly faded stamp.",
+    data: {
+      title: "From afar",
+      message: "Hello,\n\nI'm somewhere far away. The sky is clear, and the wind carries the scent of an unfamiliar city.\n\nWhen I return, I'll tell you all the stories from the road.",
+      from: "From: A traveler",
+      to: "To: Family",
+      stampText: "POST",
+      note: "Letter from afar template",
+    },
+  },
+  "quiet-stationery": {
+    label: "Quiet stationery",
+    description: "Textured, ruled stationery for a thoughtful, longer letter.",
+    data: {
+      title: "A letter for you",
+      message: "Dear you,\n\nSome things are best written down, slowly. May this page keep the thoughts I didn't get to share in person.\n\nI hope all is well, and that we meet again soon.",
+      note: "Quiet stationery template",
+    },
+  },
+  "tone-warm": {
+    label: "Warm",
+    description: "Gentle and affectionate, for someone important.",
+    data: {
+      title: "For you",
+      message: "Dear friend,\n\nMay every day treat you kindly. May there be light in your heart and someone by your side.\n\nMay this wish land softly, like a spring breeze.",
+      caption: "Always surrounded by love",
+      backCaption: "Dear friend,\n\nMay every day treat you kindly. May there be light in your heart and someone by your side.\n\nMay this wish land softly, like a spring breeze.",
+    },
+  },
+  "tone-business": {
+    label: "Business",
+    description: "Professional and thoughtful, for work correspondence.",
+    data: {
+      title: "Warm regards",
+      message: "Dear colleague,\n\nI would like to express my sincere thanks and best wishes.\n\nMay we continue to move forward together and enjoy a successful partnership.",
+      caption: "To a successful partnership",
+      backCaption: "Dear colleague,\n\nI would like to express my sincere thanks and best wishes.\n\nMay we continue to move forward together and enjoy a successful partnership.",
+    },
+  },
+};
+
+export function localizeTemplate(template: LetterTemplate, language: AppLocale): LetterTemplate {
+  const translation = language === "en" ? englishTemplates[template.id] : undefined;
+  return translation
+    ? {
+        ...template,
+        label: translation.label,
+        description: translation.description,
+        data: { ...template.data, ...translation.data },
+      }
+    : template;
+}

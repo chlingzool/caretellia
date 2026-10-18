@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { t } from "./i18n";
 
 const emit = defineEmits<{
   (event: "close"): void;
@@ -51,32 +52,32 @@ onBeforeUnmount(() => {
     >
       <header class="thanks-header">
         <div>
-          <p class="thanks-eyebrow">致谢与声明</p>
-          <h2 id="thanks-title">感谢开源社区与每一份协助</h2>
-          <p id="thanks-intro"></p>
+          <p class="thanks-eyebrow">{{ t("致谢与声明", "Acknowledgements") }}</p>
+          <h2 id="thanks-title">{{ t("感谢开源社区与每一份协助", "Thanks to the open-source community and everyone who helped") }}</h2>
+          <p id="thanks-intro">{{ t("项目中使用的开源框架与项目，以及作者信息。", "Open-source projects used by Caretellia and information about its author.") }}</p>
         </div>
-        <button ref="closeButton" class="thanks-close" type="button" aria-label="关闭感谢菜单" @click="emit('close')">
+        <button ref="closeButton" class="thanks-close" type="button" :aria-label="t('关闭感谢菜单', 'Close acknowledgements')" @click="emit('close')">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
         </button>
       </header>
 
       <div class="thanks-content">
         <section class="thanks-section author-section" aria-labelledby="author-heading">
-          <h3 id="author-heading">作者</h3>
+          <h3 id="author-heading">{{ t("作者", "Author") }}</h3>
           <p class="author-name">chlingzool</p>
           <div class="author-links">
             <a href="https://gravatar.com/chlingzool" target="_blank" rel="noreferrer">Gravatar <span aria-hidden="true">↗</span></a>
-            <a href="https://afdian.com/a/chlingzool" target="_blank" rel="noreferrer">爱发电 <span aria-hidden="true">↗</span></a>
+            <a href="https://afdian.com/a/chlingzool" target="_blank" rel="noreferrer">{{ t("爱发电", "Afdian") }} <span aria-hidden="true">↗</span></a>
             <a href="mailto:chlingzool@outlook.com">chlingzool@outlook.com</a>
           </div>
         </section>
 
         <section class="thanks-section" aria-labelledby="opensource-heading">
-          <h3 id="opensource-heading">框架与开源项目</h3>
+          <h3 id="opensource-heading">{{ t("框架与开源项目", "Frameworks & open-source projects") }}</h3>
           <ul class="credits-list">
             <li>
               <a href="https://vuejs.org/" target="_blank" rel="noreferrer">Vue</a>
-              <a class="license-link" href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">许可证</a>
+              <a class="license-link" href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">{{ t("许可证", "License") }}</a>
             </li>
             <li>
               <a href="https://tauri.app/" target="_blank" rel="noreferrer">Tauri</a>
@@ -87,19 +88,20 @@ onBeforeUnmount(() => {
             </li>
             <li>
               <a href="https://vite.dev/" target="_blank" rel="noreferrer">Vite</a>
-              <a class="license-link" href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">许可证</a>
+              <a class="license-link" href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">{{ t("许可证", "License") }}</a>
             </li>
           </ul>
         </section>
 
-        <section class="thanks-section" aria-labelledby="license-heading">
-          <h3 id="license-heading">项目版权与许可</h3>
-          <p>本项目自身的许可证尚未声明，待建立项目仓库后补充。依赖项目的许可证不代表 Caretellia 自身采用相同许可证。</p>
+        <section class="thanks-section project-section" aria-labelledby="project-heading">
+          <h3 id="project-heading">{{ t("项目版本", "Project version") }}</h3>
+          <a class="repository-link" href="https://github.com/chlingzool/caretellia" target="_blank" rel="noreferrer">{{ t("Caretellia GitHub 仓库", "Caretellia GitHub repository") }} <span aria-hidden="true">↗</span></a>
+          <span class="version-badge">v1</span>
         </section>
 
         <section class="thanks-section special-thanks" aria-labelledby="special-heading">
-          <h3 id="special-heading">特别感谢</h3>
-          <p>项目全部代码交由 <a href="https://github.com/features/copilot" target="_blank" rel="noreferrer">GitHub Copilot</a> 负责(已进行人工审核)，感谢 GitHub 让我这种穷学生也吃上好的了。</p>
+          <h3 id="special-heading">{{ t("特别感谢", "Special thanks") }}</h3>
+          <p>{{ t("项目全部代码交由", "All project code was written by") }} <a href="https://github.com/features/copilot" target="_blank" rel="noreferrer">GitHub Copilot</a> {{ t("负责(已进行人工审核)，感谢 GitHub 让我这种穷学生也吃上好的了。", "(and manually reviewed). Thanks to GitHub for giving a broke student like me access to the good stuff.") }}</p>
         </section>
       </div>
     </section>
@@ -180,7 +182,8 @@ onBeforeUnmount(() => {
 
 .thanks-close:focus-visible,
 .author-links a:focus-visible,
-.credits-list a:focus-visible {
+.credits-list a:focus-visible,
+.repository-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -280,6 +283,37 @@ onBeforeUnmount(() => {
 
 .license-link {
   font-size: 0.86em;
+}
+
+.project-section {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 14px;
+}
+
+.project-section h3 {
+  flex: 0 0 100%;
+}
+
+.repository-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.repository-link:hover {
+  text-decoration: underline;
+}
+
+.version-badge {
+  padding: 3px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.78em;
+  font-weight: 650;
+  line-height: 1.4;
 }
 
 .special-thanks {
