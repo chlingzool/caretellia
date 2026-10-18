@@ -62,6 +62,16 @@ npm run build
 npm run tauri build
 ```
 
+## 更新项目版本号
+
+在项目根目录运行以下命令，并按提示输入新的 `major.minor.patch` 版本号：
+
+```bash
+npm run verup
+```
+
+脚本会先显示当前版本，再同步更新 npm、Tauri 和 Cargo 的项目版本及 lockfile，不会更改依赖版本。需要先安装 Python 并确保 `python` 命令可用。
+
 ## 移动端构建
 
 在 GitHub Actions 的 `mobile-build` 工作流中手动运行，可构建并下载 Android arm64 调试 APK 和 iOS arm64 Simulator 调试应用。工作流会在 CI 中初始化 Tauri 移动工程；构建产物保留 7 天。
