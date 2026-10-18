@@ -1,6 +1,6 @@
 [package]
 name = "caretellia"
-version = "1.1.2-RE1"
+version = "1.1.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "caretellia",
-  "version": "1.1.2-RE1",
+  "version": "1.1.2",
   "identifier": "com.chlingzool.caretellia",
   "build": {
     "beforeDevCommand": "npm run dev",
