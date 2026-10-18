@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "caretellia"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "cocoa",
  "fontconfig",
