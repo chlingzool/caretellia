@@ -77,6 +77,14 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: upload desktop artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: caretellia-desktop-${{ strategy.job-index }}
+          path: src-tauri/target/**/release/bundle/**/*
+          if-no-files-found: error
+          retention-days: 7
+
   mobile-build:
     name: Build mobile artifacts
     needs: publish-tauri
