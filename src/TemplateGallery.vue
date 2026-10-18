@@ -32,12 +32,12 @@ function categoryLabel(category: (typeof categories)[number]) {
       <div>
         <p class="eyebrow">{{ t("灵感与版式", "Inspiration & layouts") }}</p>
         <h1>{{ t("从模板开始", "Browse templates") }}</h1>
-        <p class="description">{{ t("像挑选演示文稿主题一样，选一张版式，再替换成自己的内容。", "Choose a layout, then make it your own.") }}</p>
+        <p class="description">{{ t("先选一份接近心意的初稿，再写成只属于你们的故事。称呼、正文和样式都可以继续修改。", "Start with a draft that feels close, then make it your own. You can edit every line, name, and design detail.") }}</p>
       </div>
-      <span class="template-count">{{ t(`${visibleTemplates.length} 个模板`, `${visibleTemplates.length} templates`) }}</span>
+      <span class="template-count">{{ t(`${visibleTemplates.length} 份灵感`, `${visibleTemplates.length} ideas`) }}</span>
     </header>
 
-    <nav class="category-filter" aria-label="模板分类">
+    <nav class="category-filter" :aria-label="t('模板分类', 'Template categories')">
       <button
         v-for="category in categories"
         :key="category"
@@ -68,7 +68,7 @@ function categoryLabel(category: (typeof categories)[number]) {
           <span class="template-category">{{ categoryLabel(template.category) }}</span>
           <span class="template-description">{{ template.description }}</span>
         </span>
-        <span class="template-use">{{ t("使用模板", "Use template") }} <span aria-hidden="true">→</span></span>
+        <span class="template-use">{{ t("用这份初稿", "Start with this draft") }} <span aria-hidden="true">→</span></span>
       </button>
     </div>
   </section>
@@ -121,6 +121,7 @@ h1 {
 }
 
 .category-filter button {
+  min-height: 40px;
   padding: 7px 12px;
   border: 1px solid var(--border);
   border-radius: 2px;
@@ -243,10 +244,14 @@ h1 {
 
 .art-caption {
   max-width: 76%;
+  display: -webkit-box;
+  overflow: hidden;
   color: color-mix(in srgb, var(--ink), transparent 24%);
   font-family: Georgia, "Noto Serif SC", serif;
   font-size: 0.7143em;
   text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .art-lines {
@@ -315,14 +320,20 @@ h1 {
 
 .template-description {
   grid-column: 1 / -1;
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--muted);
   font-size: 0.7857em;
   line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .template-use {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  min-height: 38px;
   padding: 9px 3px 2px;
   border-top: 1px solid var(--border);
   color: var(--accent);
@@ -337,6 +348,22 @@ h1 {
 
   .template-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .category-filter button {
+    min-height: 44px;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .template-card {
+    padding: 12px;
+  }
+
+  .template-use {
+    min-height: 44px;
   }
 }
 </style>

@@ -1,5 +1,10 @@
 .mail-stage {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: center;
+  justify-items: center;
   width: min(85vw, 600px);
   height: min(55vh, 400px);
   margin: 0 auto;
@@ -9,35 +14,37 @@
 }
 
 .mail-stage.expanded {
+  grid-template-rows: auto auto;
+  align-items: start;
+  min-height: 0;
+  aspect-ratio: auto;
+  overflow: visible;
+  padding: 16px 0 20px;
   cursor: pointer;
 }
 
 .letter-mask {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  position: relative;
+  grid-area: 1 / 1;
   width: calc(100% - 40px);
   height: calc(100% - 40px);
   overflow: hidden;
   border-radius: 3px;
   z-index: 1;
   background: #f8f7f3;
-  transition: width 0.4s cubic-bezier(0.2, 0.75, 0.25, 1),
-    height 0.4s cubic-bezier(0.2, 0.75, 0.25, 1),
-    top 0.4s cubic-bezier(0.2, 0.75, 0.25, 1),
-    transform 0.4s cubic-bezier(0.2, 0.75, 0.25, 1),
+  transition: width 0.68s cubic-bezier(0.2, 0.75, 0.25, 1),
+    height 0.68s cubic-bezier(0.2, 0.75, 0.25, 1),
     box-shadow 0.4s ease;
   box-shadow: 0 8px 20px rgba(31, 33, 30, 0.12), 0 0 0 1px rgba(67, 69, 64, 0.12);
 }
 
 .mail-stage.expanded .letter-mask {
-  top: 50%;
-  width: min(85vw, 650px);
+  width: min(calc(100% - 24px), 650px);
+  max-width: none;
   height: auto;
   min-height: 320px;
   overflow: visible;
-  transform: translate(-50%, -50%) translateY(-70px);
+  margin: 0;
   border-radius: 3px;
   box-shadow: 0 12px 28px rgba(31, 33, 30, 0.16), 0 0 0 1px rgba(67, 69, 64, 0.12);
   z-index: 20;
@@ -45,6 +52,11 @@
 }
 
 .mail-stage .mail-base {
+  position: relative;
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
   transition-duration: 0.68s;
 }
 
@@ -202,23 +214,19 @@
 }
 
 .mail-base {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 100%;
-  height: 100%;
-  z-index: 10;
-  transition: transform 0.48s cubic-bezier(0.2, 0.75, 0.25, 1), opacity 0.48s ease;
-  transform-origin: center center;
+  transition: transform 0.68s cubic-bezier(0.2, 0.75, 0.25, 1), opacity 0.48s ease;
 }
 
 .mail-stage.expanded .mail-base {
-  transform: translate(-50%, 24%) rotate(-3deg) scale(0.88);
+  grid-area: 2 / 1;
+  height: auto;
+  margin-top: -64px;
+  aspect-ratio: 8 / 5;
+  transform: rotate(-3deg) scale(0.88);
+  transform-origin: center top;
   opacity: 0.94;
   z-index: 5;
-  height: auto;
-  aspect-ratio: 8 / 5;
+  transition: transform 0.68s cubic-bezier(0.2, 0.75, 0.25, 1), opacity 0.48s ease;
 }
 
 .envelope-body {

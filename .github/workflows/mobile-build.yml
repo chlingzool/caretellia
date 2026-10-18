@@ -1,0 +1,113 @@
+name: mobile-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android arm64 debug APK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools ndk;27.2.12479018'
+
+      - name: configure Android NDK
+        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: install frontend dependencies
+        run: npm ci
+
+      - name: initialize Android project
+        run: npm run tauri -- android init --ci --skip-targets-install
+
+      - name: build Android APK
+        run: npm run tauri -- android build --debug --apk --target aarch64 --ci
+
+      - name: collect Android APK
+        shell: bash
+        run: |
+          apk_path="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit)"
+          if [[ -z "$apk_path" ]]; then
+            echo "Android build completed without producing an APK." >&2
+            exit 1
+          fi
+          mkdir -p mobile-artifacts
+          cp "$apk_path" mobile-artifacts/caretellia-android-arm64-debug.apk
+
+      - name: upload Android APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: caretellia-android-arm64-debug
+          path: mobile-artifacts/caretellia-android-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  ios-simulator:
+    name: iOS arm64 Simulator debug app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - name: install frontend dependencies
+        run: npm ci
+
+      - name: initialize iOS project
+        run: npm run tauri -- ios init --ci --skip-targets-install
+
+      - name: build iOS Simulator app
+        run: npm run tauri -- ios build --debug --target aarch64-sim --no-sign
+
+      - name: collect iOS Simulator app
+        shell: bash
+        run: |
+          app_path="$(find src-tauri/gen/apple/build -type d -name '*.app' -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo "iOS build completed without producing a Simulator app." >&2
+            exit 1
+          fi
+          mkdir -p mobile-artifacts
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" \
+            mobile-artifacts/caretellia-ios-arm64-simulator-debug.zip
+
+      - name: upload iOS Simulator app
+        uses: actions/upload-artifact@v6
+        with:
+          name: caretellia-ios-arm64-simulator-debug
+          path: mobile-artifacts/caretellia-ios-arm64-simulator-debug.zip
+          if-no-files-found: error
+          retention-days: 7

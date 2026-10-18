@@ -11,7 +11,7 @@
 - 信纸支持添加贴纸，并可拖动、缩放和旋转；贴纸布局会随信件保存。
 - 通过模板库浏览信封、明信片、信纸版式和文案。
 - 信封预览按“打开信封、抽出信纸”的顺序展开，并支持收回。
-- 编辑预览支持调整大小；窄屏界面提供折叠菜单，方便在手机上使用。
+- 编辑预览支持调整大小；窄屏界面提供折叠菜单。Android 端适配系统返回键、安全区域和触控操作，表单输入与贴纸控件也针对触屏优化。
 
 ### 保存、导出与导入
 
@@ -61,6 +61,12 @@ npm run build
 ```bash
 npm run tauri build
 ```
+
+## 移动端构建
+
+在 GitHub Actions 的 `mobile-build` 工作流中手动运行，可构建并下载 Android arm64 调试 APK 和 iOS arm64 Simulator 调试应用。工作流会在 CI 中初始化 Tauri 移动工程；构建产物保留 7 天。
+
+Android APK 可安装到 arm64 Android 设备用于测试；iOS 产物仅用于 Simulator。安装到实体 iPhone 或发布到 App Store 仍需 Apple 开发者签名证书和 provisioning profile，本工作流不处理签名或商店发布。
 
 ## 项目结构
 
