@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "caretellia"
-version = "1.1.2-RE1"
+version = "1.1.2"
 dependencies = [
  "cocoa",
  "fontconfig",

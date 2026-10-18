@@ -94,9 +94,8 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="thanks-section project-section" aria-labelledby="project-heading">
-          <h3 id="project-heading">{{ t("项目版本", "Project version") }}</h3>
+          <h3 id="project-heading">{{ t("项目地址", "Project") }}</h3>
           <a class="repository-link" href="https://github.com/chlingzool/caretellia" target="_blank" rel="noreferrer">{{ t("Caretellia GitHub 仓库", "Caretellia GitHub repository") }} <span aria-hidden="true">↗</span></a>
-          <span class="version-badge">v1</span>
         </section>
 
         <section class="thanks-section special-thanks" aria-labelledby="special-heading">
@@ -303,17 +302,6 @@ onBeforeUnmount(() => {
 
 .repository-link:hover {
   text-decoration: underline;
-}
-
-.version-badge {
-  padding: 3px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface-alt);
-  color: var(--text);
-  font-size: 0.78em;
-  font-weight: 650;
-  line-height: 1.4;
 }
 
 .special-thanks {
