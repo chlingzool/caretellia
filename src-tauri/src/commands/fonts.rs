@@ -133,27 +133,93 @@ fn get_fonts_macos() -> Result<Vec<FontInfo>, String> {
 // ==================== Linux ====================
 #[cfg(target_os = "linux")]
 fn get_fonts_linux() -> Result<Vec<FontInfo>, String> {
-    use fontconfig::{FcMatchKind, FcPattern, FontConfig};
+    use fontconfig_sys::{
+        FcConfigGetCurrent, FcFontList, FcFontSet, FcFontSetDestroy, FcObjectSet, FcObjectSetAdd,
+        FcObjectSetCreate, FcObjectSetDestroy, FcPattern, FcPatternCreate, FcPatternDestroy,
+        FcPatternGetString, FcResultMatch, FC_FAMILY, FC_STYLE,
+    };
+    use std::ffi::CStr;
+    use std::ptr;
 
-    let fc =
-        FontConfig::default().map_err(|e| format!("FontConfig init failed: {:?}", e))?;
+    struct Pattern(*mut FcPattern);
 
-    let pattern = FcPattern::default();
+    impl Drop for Pattern {
+        fn drop(&mut self) {
+            unsafe { FcPatternDestroy(self.0) };
+        }
+    }
+
+    struct ObjectSet(*mut FcObjectSet);
+
+    impl Drop for ObjectSet {
+        fn drop(&mut self) {
+            unsafe { FcObjectSetDestroy(self.0) };
+        }
+    }
+
+    struct FontSet(*mut FcFontSet);
+
+    impl Drop for FontSet {
+        fn drop(&mut self) {
+            unsafe { FcFontSetDestroy(self.0) };
+        }
+    }
+
+    let _fontconfig = fontconfig::Fontconfig::new()
+        .ok_or_else(|| "FontConfig initialization failed".to_owned())?;
+    let config = unsafe { FcConfigGetCurrent() };
+    if config.is_null() {
+        return Err("FontConfig has no active configuration".into());
+    }
+
+    let pattern = Pattern(unsafe { FcPatternCreate() });
+    if pattern.0.is_null() {
+        return Err("Failed to create FontConfig pattern".into());
+    }
+
+    let objects = ObjectSet(unsafe { FcObjectSetCreate() });
+    if objects.0.is_null() {
+        return Err("Failed to create FontConfig object set".into());
+    }
+    if unsafe { FcObjectSetAdd(objects.0, FC_FAMILY.as_ptr()) } == 0
+        || unsafe { FcObjectSetAdd(objects.0, FC_STYLE.as_ptr()) } == 0
+    {
+        return Err("Failed to configure FontConfig font properties".into());
+    }
+
+    let font_set = FontSet(unsafe { FcFontList(config, pattern.0, objects.0) });
+    if font_set.0.is_null() {
+        return Err("Failed to list system fonts".into());
+    }
+
     let mut fonts = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let font_set_ref = unsafe { &*font_set.0 };
 
-    // 遍历所有匹配结果
-    let iter = fc
-        .font_sort(&pattern, true)
-        .map_err(|e| format!("Font sort failed: {:?}", e))?;
-
-    for font in iter {
-        if let Some(family) = font.get_family() {
+    for index in 0..font_set_ref.nfont.max(0) as usize {
+        let font = unsafe { *font_set_ref.fonts.add(index) };
+        let mut family_ptr = ptr::null_mut();
+        if unsafe { FcPatternGetString(font, FC_FAMILY.as_ptr(), 0, &mut family_ptr) }
+            == FcResultMatch
+            && !family_ptr.is_null()
+        {
+            let family = unsafe { CStr::from_ptr(family_ptr.cast()) }
+                .to_string_lossy()
+                .into_owned();
             if seen.insert(family.clone()) {
-                fonts.push(FontInfo {
-                    family,
-                    style: font.get_style().unwrap_or_default(),
-                });
+                let mut style_ptr = ptr::null_mut();
+                let style =
+                    if unsafe { FcPatternGetString(font, FC_STYLE.as_ptr(), 0, &mut style_ptr) }
+                        == FcResultMatch
+                        && !style_ptr.is_null()
+                    {
+                        unsafe { CStr::from_ptr(style_ptr.cast()) }
+                            .to_string_lossy()
+                            .into_owned()
+                    } else {
+                        String::new()
+                    };
+                fonts.push(FontInfo { family, style });
             }
         }
     }

@@ -34,6 +34,7 @@ objc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 fontconfig = "0.9"
+yeslogic-fontconfig-sys = "6"
 
 
 # Read more about RUSTFLAGS optimization guidelines at https://tauri.app/learn/develop/production-apps/#rust-optimization
