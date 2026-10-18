@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { exit, onBackButtonPress } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import postcardEditor from "./postcard-editor.vue";
 import TemplateGallery from "./TemplateGallery.vue";
@@ -16,9 +18,14 @@ type Screen =
   | { kind: "home" }
   | { kind: "editor"; entry: "new" | "history" | "template"; sessionId: string; cardId?: string; template?: LetterTemplate }
   | { kind: "history" }
-  | { kind: "viewer" }
+  | { kind: "viewer"; initialFilePath?: string; openRequestId?: number }
   | { kind: "templates" }
   | { kind: "settings" };
+
+interface ClcOpenRequest {
+  id: number;
+  path: string;
+}
 
 const screens = ref<Screen[]>([{ kind: "home" }]);
 const historyCards = ref<PostcardData[]>([]);
@@ -35,6 +42,8 @@ const thanksButton = ref<HTMLButtonElement | null>(null);
 const mobileMenuButton = ref<HTMLButtonElement | null>(null);
 const mobileMenuRoot = ref<HTMLElement | null>(null);
 let androidBackButtonListener: Awaited<ReturnType<typeof onBackButtonPress>> | null = null;
+let unlistenClcOpen: UnlistenFn | null = null;
+const handledClcOpenRequests = new Set<number>();
 const settings: AppSettings = reactive(readSettings());
 setLocale(settings.locale);
 const theme = ref<"light" | "dark">(
@@ -110,6 +119,29 @@ function readSettings(): AppSettings {
 
 function navigate(screen: Screen) {
   screens.value = [...screens.value, screen];
+}
+
+function openClcFileFromSystem(request: ClcOpenRequest) {
+  if (handledClcOpenRequests.has(request.id)) return;
+  handledClcOpenRequests.add(request.id);
+  navigate({ kind: "viewer", initialFilePath: request.path, openRequestId: request.id });
+}
+
+async function registerClcOpenHandler() {
+  if (!("__TAURI_INTERNALS__" in window)) return;
+  try {
+    unlistenClcOpen = await listen<ClcOpenRequest>("caretellia-open-clc", (event) => {
+      openClcFileFromSystem(event.payload);
+    });
+  } catch (error) {
+    console.error("Unable to listen for opened CLC files:", error);
+  }
+  try {
+    const requests = await invoke<ClcOpenRequest[]>("take_initial_clc_files");
+    requests.forEach(openClcFileFromSystem);
+  } catch (error) {
+    console.error("Unable to retrieve opened CLC files:", error);
+  }
 }
 
 function goBack() {
@@ -279,6 +311,7 @@ function handleAndroidBackButton(canGoBack: boolean) {
 
 onMounted(() => {
   void refreshHistory();
+  void registerClcOpenHandler();
   if ("__TAURI_INTERNALS__" in window && /android/i.test(navigator.userAgent)) {
     void onBackButtonPress(({ canGoBack }) => handleAndroidBackButton(canGoBack))
       .then((listener) => {
@@ -294,6 +327,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  unlistenClcOpen?.();
   if (androidBackButtonListener) {
     void androidBackButtonListener.unregister()
       .catch((error) => console.error("Unable to unregister Android back-button handling:", error));
@@ -423,7 +457,9 @@ onBeforeUnmount(() => {
 
       <EnvelopeViewer
         v-else-if="currentScreen.kind === 'viewer'"
+        :key="currentScreen.openRequestId ?? 'history-viewer'"
         :recent-view-limit="settings.recentViewedLimit"
+        :initial-file-path="currentScreen.initialFilePath"
         @back="goBack"
       />
 

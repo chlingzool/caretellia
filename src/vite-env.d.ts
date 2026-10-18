@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+declare const __APP_VERSION__: string;
+declare const __TAURI_ENV_PLATFORM__: string;
+
 declare module "*.vue" {
   import type { DefineComponent } from "vue";
   const component: DefineComponent<{}, {}, any>;

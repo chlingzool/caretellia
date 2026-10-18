@@ -1,7 +1,7 @@
 {
   "name": "caretellia",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2-RE1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.8.3",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "~2.13.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {

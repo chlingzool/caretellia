@@ -1,8 +1,31 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { getVersion } from "@tauri-apps/api/app";
+import { isTauri } from "@tauri-apps/api/core";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import { computed, onMounted, ref } from "vue";
 import { DEFAULT_FONT_FAMILIES, SYSTEM_DEFAULT_FONT, useSystemFonts } from "./composables/useSystemFonts";
 import { t } from "./i18n";
+import { clearAllLocalData } from "./letterHistory";
 import type { AppSettings } from "./types/postcard";
+
+const appVersion = ref(__APP_VERSION__);
+const versionError = ref("");
+const versionParts = computed(() => {
+  const match = appVersion.value.match(/^(\d+\.\d+\.\d+)(.*)$/);
+  return {
+    core: match?.[1] ?? appVersion.value,
+    suffix: match?.[2]?.replace(/^[+-]/, "").toUpperCase() ?? "",
+  };
+});
+const canCheckUpdates = isTauri() && ["windows", "darwin", "linux"].includes(__TAURI_ENV_PLATFORM__);
+const updateBusy = ref(false);
+const updateMessage = ref("");
+const updateError = ref(false);
+const clearingData = ref(false);
+const clearDataMessage = ref("");
+const clearDataError = ref(false);
 
 const props = defineProps<{
   settings: AppSettings;
@@ -18,9 +41,10 @@ const sections = computed(() => [
   { id: "settings-interface", label: t("界面外观", "Appearance") },
   { id: "settings-export", label: t("导出位置", "Export location") },
   { id: "settings-storage", label: t("数据与隐私", "Data & privacy") },
+  { id: "settings-updates", label: t("更新", "Updates") },
 ] as const);
 
-type SettingsSectionId = "settings-interface" | "settings-export" | "settings-storage";
+type SettingsSectionId = "settings-interface" | "settings-export" | "settings-storage" | "settings-updates";
 const activeSection = ref<SettingsSectionId>("settings-interface");
 const {
   systemFontList,
@@ -63,6 +87,115 @@ function updateSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K
 function navigateToSection(id: SettingsSectionId) {
   activeSection.value = id;
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+onMounted(() => {
+  if (isTauri()) {
+    void getVersion().then((version) => {
+      appVersion.value = version;
+    }).catch((error: unknown) => {
+      console.error("Unable to read app version:", error);
+      versionError.value = t("无法读取当前应用版本。", "Could not read the current app version.");
+    });
+  }
+});
+
+async function checkForUpdates() {
+  if (!canCheckUpdates || updateBusy.value) return;
+
+  updateBusy.value = true;
+  updateError.value = false;
+  updateMessage.value = t("正在检查更新…", "Checking for updates…");
+  let update: Awaited<ReturnType<typeof check>> = null;
+
+  try {
+    update = await check();
+    if (!update) {
+      updateMessage.value = t("当前已是最新版本。", "You are using the latest version.");
+      return;
+    }
+
+    const shouldInstall = await confirmDialog(
+      t(`发现新版本 ${update.version}，现在下载并安装吗？`, `Version ${update.version} is available. Download and install it now?`),
+      {
+        title: t("发现新版本", "Update available"),
+        kind: "info",
+        okLabel: t("立即更新", "Update now"),
+        cancelLabel: t("稍后", "Later"),
+      },
+    );
+    if (!shouldInstall) {
+      updateMessage.value = t(`已发现版本 ${update.version}，可稍后再次检查。`, `Version ${update.version} is available. You can check again later.`);
+      return;
+    }
+
+    let downloadedBytes = 0;
+    let totalBytes: number | undefined;
+    updateMessage.value = t("正在准备下载更新…", "Preparing to download the update…");
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        totalBytes = event.data.contentLength;
+        updateMessage.value = t("正在下载并安装更新…", "Downloading and installing the update…");
+      } else if (event.event === "Progress") {
+        downloadedBytes += event.data.chunkLength;
+        const progress = totalBytes
+          ? ` ${Math.floor((downloadedBytes / totalBytes) * 100)}%`
+          : "";
+        updateMessage.value = t(`正在下载并安装更新…${progress}`, `Downloading and installing the update…${progress}`);
+      } else {
+        updateMessage.value = t("更新已下载，正在安装…", "Update downloaded. Installing…");
+      }
+    });
+    updateMessage.value = t("更新已安装，正在重新启动…", "Update installed. Restarting…");
+    await relaunch();
+  } catch (error) {
+    console.error("Unable to check for or install app updates:", error);
+    updateError.value = true;
+    const detail = error instanceof Error ? error.message : String(error);
+    updateMessage.value = t(`更新失败：${detail}`, `Update failed: ${detail}`);
+  } finally {
+    if (update) {
+      try {
+        await update.close();
+      } catch (error) {
+        console.error("Unable to release app updater resource:", error);
+      }
+    }
+    updateBusy.value = false;
+  }
+}
+
+async function clearStoredData() {
+  if (clearingData.value) return;
+
+  try {
+    const confirmed = await confirmDialog(
+      t(
+        "此操作会永久删除本机保存的全部信件、最近查看记录和应用设置，且无法撤销。已导出到其他位置的文件不会被删除。确定继续吗？",
+        "This permanently deletes all letters, recently viewed entries, and app settings stored on this device. This cannot be undone. Exported files elsewhere will not be deleted. Continue?",
+      ),
+      {
+        title: t("清除全部数据", "Clear all data"),
+        kind: "warning",
+        okLabel: t("清除全部数据", "Clear all data"),
+        cancelLabel: t("取消", "Cancel"),
+      },
+    );
+    if (!confirmed) return;
+
+    clearingData.value = true;
+    clearDataError.value = false;
+    clearDataMessage.value = t("正在清除本机数据…", "Clearing local data…");
+    await clearAllLocalData();
+    window.location.reload();
+  } catch (error) {
+    console.error("Unable to clear local app data:", error);
+    clearDataError.value = true;
+    const detail = error instanceof Error ? error.message : String(error);
+    clearDataMessage.value = t(`清除数据失败：${detail}`, `Could not clear data: ${detail}`);
+  } finally {
+    clearingData.value = false;
+  }
 }
 </script>
 
@@ -175,6 +308,40 @@ function navigateToSection(id: SettingsSectionId) {
               <option :value="30">{{ t("30 封", "30 letters") }}</option>
             </select>
           </label>
+          <div class="setting-row clear-data-row">
+            <span class="setting-copy">
+              <strong>{{ t("清除全部数据", "Clear all data") }}</strong>
+              <small>{{ t("删除本机保存的信件、最近查看记录和应用设置；已导出的文件不受影响。", "Delete locally saved letters, recent entries, and app settings. Exported files are not affected.") }}</small>
+            </span>
+            <button class="clear-data-button" type="button" :disabled="clearingData" @click="clearStoredData">
+              {{ clearingData ? t("正在清除…", "Clearing…") : t("清除全部数据", "Clear all data") }}
+            </button>
+          </div>
+          <p v-if="clearDataMessage" class="clear-data-status" :class="{ 'setting-error': clearDataError }" :role="clearDataError ? 'alert' : 'status'" aria-live="polite">{{ clearDataMessage }}</p>
+        </section>
+
+        <section id="settings-updates" class="settings-section">
+          <h2>{{ t("更新", "Updates") }}</h2>
+          <p class="section-description">{{ t("检查 GitHub 上已发布的稳定版本，并可在桌面应用内完成更新。", "Check published stable releases on GitHub and update directly in the desktop app.") }}</p>
+          <div class="setting-row">
+            <span class="setting-copy">
+              <strong>{{ t("当前版本", "Current version") }}</strong>
+              <small>{{ versionError || t("已安装的应用版本", "Installed app version") }}</small>
+            </span>
+            <span class="version-code" :aria-label="`${versionParts.core}${versionParts.suffix ? ` ${versionParts.suffix}` : ''}`">
+              <strong>{{ versionParts.core }}</strong><small v-if="versionParts.suffix" class="version-suffix">{{ versionParts.suffix }}</small>
+            </span>
+          </div>
+          <div class="setting-row update-check-row">
+            <span class="setting-copy">
+              <strong>{{ t("检查更新", "Check for updates") }}</strong>
+              <small>{{ canCheckUpdates ? t("仅安装已发布的稳定版本；更新包会先验证签名。", "Only published stable releases are installed; update signatures are verified first.") : t("应用内自动更新仅支持 Windows、macOS 和 Linux 桌面版。", "In-app updates are available only on Windows, macOS, and Linux desktop builds.") }}</small>
+            </span>
+            <button class="browse-button update-check" type="button" :disabled="!canCheckUpdates || updateBusy" @click="checkForUpdates">
+              {{ updateBusy ? t("处理中…", "Working…") : t("检查更新", "Check for updates") }}
+            </button>
+          </div>
+          <p v-if="updateMessage" class="update-status" :class="{ 'setting-error': updateError }" :role="updateError ? 'alert' : 'status'" aria-live="polite">{{ updateMessage }}</p>
         </section>
       </div>
     </div>
@@ -402,6 +569,64 @@ h1 {
   background: var(--surface-hover);
 }
 
+.update-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.version-code {
+  display: inline-flex;
+  align-items: baseline;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.version-code strong {
+  font-size: 1.8em;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.version-suffix {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.clear-data-button {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid #c84840;
+  border-radius: 2px;
+  background: transparent;
+  color: #c84840;
+  font: inherit;
+  font-size: 0.8571em;
+  cursor: pointer;
+}
+
+.clear-data-button:hover:not(:disabled) {
+  background: rgb(200 72 64 / 8%);
+}
+
+.clear-data-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.clear-data-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.8571em;
+}
+
+.update-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.8571em;
+}
+
  .setting-hint {
   margin: 8px 0 0;
   font-size: 0.7857em;
@@ -467,6 +692,7 @@ h1 {
   .setting-row select,
   .directory-control input,
   .browse-button,
+  .clear-data-button,
   .font-refresh {
     min-height: 44px;
     font-size: 16px;
