@@ -52,5 +52,6 @@ export interface AppSettings {
   uiFontSize: number;
   exportDirectory: string;
   exportColorMode: "light" | "dark" | "system";
+  recentViewedLimit: number;
   locale: "system" | "zh" | "en";
 }

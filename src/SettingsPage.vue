@@ -163,6 +163,18 @@ function navigateToSection(id: SettingsSectionId) {
         <section id="settings-storage" class="settings-section">
           <h2>{{ t("数据与隐私", "Data & privacy") }}</h2>
           <p class="section-description">{{ t("信件与界面偏好保存在本机浏览器存储中，不会上传到网络。", "Letters and preferences are stored in this browser on your device and are never uploaded.") }}</p>
+          <label class="setting-row">
+            <span class="setting-copy"><strong>{{ t("最近查看保留数量", "Recently viewed limit") }}</strong><small>{{ t("超出数量时自动移除最早的本地文件记录", "Oldest local file entries are removed when the limit is exceeded") }}</small></span>
+            <select
+              :value="settings.recentViewedLimit"
+              @change="updateSetting('recentViewedLimit', Number(($event.target as HTMLSelectElement).value), settings)"
+            >
+              <option :value="5">{{ t("5 封", "5 letters") }}</option>
+              <option :value="10">{{ t("10 封", "10 letters") }}</option>
+              <option :value="20">{{ t("20 封", "20 letters") }}</option>
+              <option :value="30">{{ t("30 封", "30 letters") }}</option>
+            </select>
+          </label>
         </section>
       </div>
     </div>
@@ -408,14 +420,19 @@ h1 {
   }
 
   .settings-nav {
-    position: static;
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     overflow-x: auto;
+    background: var(--surface);
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    box-shadow: 0 5px 12px rgb(20 30 40 / 7%);
   }
 
   .settings-nav button {
+    flex: 0 0 auto;
     white-space: nowrap;
     border-left: 0;
     border-bottom: 2px solid transparent;
@@ -424,6 +441,10 @@ h1 {
   .settings-nav button:hover,
   .settings-nav button.active {
     border-bottom-color: var(--accent);
+  }
+
+  .settings-section {
+    scroll-margin-top: 66px;
   }
 
   .setting-row {
