@@ -285,3 +285,15 @@ export async function deleteViewedFile(id: string): Promise<void> {
   transaction.objectStore("viewed-files").delete(id);
   await transactionDone(transaction);
 }
+
+export async function clearAllLocalData(): Promise<void> {
+  const database = await ensureReady();
+  const transaction = database.transaction(["letters", "viewed-files"], "readwrite");
+  transaction.objectStore("letters").clear();
+  transaction.objectStore("viewed-files").clear();
+  await transactionDone(transaction);
+  localStorage.removeItem(LEGACY_KEY);
+  localStorage.removeItem("caretellia-settings");
+  localStorage.removeItem("caretellia-theme");
+  localStorage.removeItem("caretellia-system-fonts-v2");
+}

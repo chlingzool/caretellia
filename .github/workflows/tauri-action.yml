@@ -23,7 +23,7 @@ jobs:
           - platform: 'ubuntu-22.04-arm' # Only available in public repos.
             args: ''
           - platform: 'windows-latest'
-            args: ''
+            args: '--bundles nsis'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -67,6 +67,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: app-v__VERSION__
           releaseName: 'App v__VERSION__'
