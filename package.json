@@ -1,13 +1,14 @@
 {
   "name": "caretellia",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "verup": "python scripts/update_version.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
