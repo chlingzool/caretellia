@@ -334,7 +334,7 @@
 
 .flip-card {
   width: 100%;
-  height: 100%;
+  aspect-ratio: 8 / 5;
   position: relative;
   transform-style: preserve-3d;
   transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);

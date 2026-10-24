@@ -698,7 +698,7 @@ button.viewer-entry-main:hover strong {
 
 }
 
-@media (max-width: 520px) {
+@media (max-width: 600px) {
   .command-bar {
     gap: 8px;
   }

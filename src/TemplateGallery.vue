@@ -341,7 +341,7 @@ h1 {
   font-weight: 600;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 680px) {
   .gallery-heading {
     align-items: flex-start;
   }

@@ -184,10 +184,16 @@ function openThanks() {
 function closeThanks() {
   showThanks.value = false;
   void nextTick(() => {
-    const isMobile = window.matchMedia("(max-width: 680px)").matches;
+    const isMobile = window.matchMedia("(max-width: 820px)").matches;
     const trigger = isMobile ? mobileMenuButton.value : thanksButton.value;
     trigger?.focus();
   });
+}
+
+function clearTouchButtonFocus(event: MouseEvent) {
+  if (!("pointerType" in event) || event.pointerType !== "touch" || !(event.target instanceof Element)) return;
+  const button = event.target.closest("button");
+  if (button instanceof HTMLButtonElement) button.blur();
 }
 
 function handleMobileMenuKeydown(event: KeyboardEvent) {
@@ -341,7 +347,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :data-theme="theme" :style="{ '--ui-font-family': settings.uiFont, '--ui-font-size': `${settings.uiFontSize}px` }">
+  <div class="app-shell" :data-theme="theme" :style="{ '--ui-font-family': settings.uiFont, '--ui-font-size': `${settings.uiFontSize}px` }" @click="clearTouchButtonFocus">
     <header ref="mobileMenuRoot" class="app-bar">
       <button class="brand" type="button" :aria-label="t('回到首页', 'Go to home')" @click="goHome">
         <span class="brand-mark" aria-hidden="true">✉</span>
@@ -908,7 +914,7 @@ onBeforeUnmount(() => {
 
 .home-shell {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
   gap: 16px;
   margin-top: 8px;
 }
@@ -964,6 +970,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  min-width: 0;
 }
 
 .home-card-label {
@@ -982,6 +989,7 @@ onBeforeUnmount(() => {
   color: var(--muted);
   font-size: 0.9286em;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .card-arrow {
@@ -1259,19 +1267,14 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-@media (max-width: 900px) {
-  .home-shell {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 680px) {
+@media (max-width: 820px) {
   .app-bar {
     position: sticky;
     top: 0;
     z-index: 20;
-    height: 52px;
-    padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+    height: auto;
+    min-height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 6px max(16px, env(safe-area-inset-left, 0px));
   }
 
   .brand-product,
@@ -1410,6 +1413,12 @@ onBeforeUnmount(() => {
   .home-shell {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+
+  .home-card {
+    grid-template-columns: 46px minmax(0, 1fr) 18px;
+    gap: 12px;
+    padding: 16px;
   }
 
   .history-item {

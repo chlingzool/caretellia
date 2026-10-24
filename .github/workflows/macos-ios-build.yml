@@ -1,16 +1,21 @@
-name: mobile-build
+name: macos-ios-build
 
 on:
   workflow_call:
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  android:
-    name: Android arm64 debug APK
-    runs-on: ubuntu-22.04
+  macos:
+    name: macOS (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v5
 
@@ -20,56 +25,45 @@ jobs:
           node-version: lts/*
           cache: npm
 
-      - name: setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools ndk;27.2.12479018'
-
-      - name: configure Android NDK
-        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: install frontend dependencies
         run: npm ci
 
-      - name: initialize Android project
-        run: npm run tauri -- android init --ci --skip-targets-install
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: 'App v__VERSION__'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}
 
-      - name: build Android APK
-        run: npm run tauri -- android build --debug --apk --target aarch64 --ci
-
-      - name: collect Android APK
-        shell: bash
-        run: |
-          apk_path="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit)"
-          if [[ -z "$apk_path" ]]; then
-            echo "Android build completed without producing an APK." >&2
-            exit 1
-          fi
-          mkdir -p mobile-artifacts
-          cp "$apk_path" mobile-artifacts/caretellia-android-arm64-debug.apk
-
-      - name: upload Android APK
+      - name: upload macOS artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: caretellia-android-arm64-debug
-          path: mobile-artifacts/caretellia-android-arm64-debug.apk
+          name: caretellia-desktop-macos-${{ matrix.target }}
+          path: src-tauri/target/**/release/bundle/**/*
           if-no-files-found: error
           retention-days: 7
 
   ios-simulator:
     name: iOS arm64 Simulator debug app
     runs-on: macos-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
 
@@ -103,12 +97,12 @@ jobs:
           fi
           mkdir -p mobile-artifacts
           ditto -c -k --sequesterRsrc --keepParent "$app_path" \
-            mobile-artifacts/caretellia-ios-arm64-simulator-debug.zip
+            mobile-artifacts/caretellia-mobile-ios-arm64-simulator-debug.zip
 
       - name: upload iOS Simulator app
         uses: actions/upload-artifact@v6
         with:
-          name: caretellia-ios-arm64-simulator-debug
-          path: mobile-artifacts/caretellia-ios-arm64-simulator-debug.zip
+          name: caretellia-mobile-ios-arm64-simulator-debug
+          path: mobile-artifacts/caretellia-mobile-ios-arm64-simulator-debug.zip
           if-no-files-found: error
           retention-days: 7
