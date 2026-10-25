@@ -638,7 +638,7 @@ h1 {
   font-size: 0.8571em;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 820px) {
   .settings-layout {
     grid-template-columns: 1fr;
     gap: 12px;

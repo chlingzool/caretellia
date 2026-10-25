@@ -1,4 +1,4 @@
-name: 'publish'
+name: publish
 
 on:
   workflow_dispatch:
@@ -7,96 +7,40 @@ on:
       - release
 
 jobs:
-  publish-tauri:
+  windows-build:
+    name: Build Windows
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'macos-latest' # for Arm based macs (M1 and above).
-            args: '--target aarch64-apple-darwin'
-          - platform: 'macos-latest' # for Intel based macs.
-            args: '--target x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            args: ''
-          - platform: 'ubuntu-22.04-arm' # Only available in public repos.
-            args: ''
-          - platform: 'windows-latest'
-            args: '--bundles nsis'
+    uses: ./.github/workflows/windows-build.yml
+    secrets: inherit
 
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v5
+  linux-build:
+    name: Build Linux
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux-build.yml
+    secrets: inherit
 
-      - name: install dependencies (ubuntu only)
-        if: startsWith(matrix.platform, 'ubuntu-')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            file \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            patchelf \
-            wget
+  macos-ios-build:
+    name: Build macOS and iOS
+    permissions:
+      contents: write
+    uses: ./.github/workflows/macos-ios-build.yml
+    secrets: inherit
 
-      - name: setup node
-        uses: actions/setup-node@v6
-        with:
-          node-version: lts/*
-          cache: npm
-
-      - name: install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - name: install frontend dependencies
-        run: npm ci
-
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: app-v__VERSION__
-          releaseName: 'App v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
-
-      - name: upload desktop artifacts
-        uses: actions/upload-artifact@v6
-        with:
-          name: caretellia-desktop-${{ strategy.job-index }}
-          path: src-tauri/target/**/release/bundle/**/*
-          if-no-files-found: error
-          retention-days: 7
-
-  mobile-build:
-    name: Build mobile artifacts
-    needs: publish-tauri
+  android-build:
+    name: Build Android
     permissions:
       contents: read
-    uses: ./.github/workflows/mobile-build.yml
+    uses: ./.github/workflows/android-build.yml
 
   publish-mobile:
     name: Attach mobile artifacts to release
     needs:
-      - publish-tauri
-      - mobile-build
+      - windows-build
+      - linux-build
+      - macos-ios-build
+      - android-build
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -106,7 +50,7 @@ jobs:
       - name: download mobile artifacts
         uses: actions/download-artifact@v6
         with:
-          pattern: caretellia-*
+          pattern: caretellia-mobile-*
           path: mobile-artifacts
           merge-multiple: true
 

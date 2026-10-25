@@ -8,6 +8,10 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [vue()],
+  build: {
+    // The Android WebView baseline is Chrome 92 and does not support media-query range syntax.
+    cssTarget: "chrome92",
+  },
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
     __TAURI_ENV_PLATFORM__: JSON.stringify(process.env.TAURI_ENV_PLATFORM ?? ""),
