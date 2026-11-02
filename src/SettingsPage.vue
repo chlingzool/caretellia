@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke, isTauri, Resource } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
@@ -20,7 +21,7 @@ const versionParts = computed(() => {
     suffix: match?.[2]?.replace(/^[+-]/, "").toUpperCase() ?? "",
   };
 });
-const canCheckUpdates = isTauri() && ["windows", "darwin", "linux"].includes(__TAURI_ENV_PLATFORM__);
+const canCheckUpdates = isTauri() && ["windows", "darwin", "linux", "android"].includes(__TAURI_ENV_PLATFORM__);
 const updateBusy = ref(false);
 const updateMessage = ref("");
 const updateError = ref(false);
@@ -41,6 +42,67 @@ interface InstallableUpdate {
   version: string;
   downloadAndInstall(onEvent?: (event: DownloadEvent) => void): Promise<void>;
   close(): Promise<void>;
+}
+
+interface GitHubRelease {
+  tag_name: string;
+  html_url: string;
+  prerelease: boolean;
+  created_at: string;
+  assets: Array<{ browser_download_url?: string; name?: string }>;
+}
+
+function parseVersionNumber(value: string): number[] {
+  return [...value.matchAll(/\d+/g)].map((match) => Number.parseInt(match[0], 10));
+}
+
+function isVersionNewer(currentVersion: string, candidateVersion: string): boolean {
+  const currentParts = parseVersionNumber(currentVersion);
+  const candidateParts = parseVersionNumber(candidateVersion);
+  const maxLength = Math.max(currentParts.length, candidateParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const currentPart = currentParts[index] ?? 0;
+    const candidatePart = candidateParts[index] ?? 0;
+    if (candidatePart > currentPart) return true;
+    if (candidatePart < currentPart) return false;
+  }
+
+  return false;
+}
+
+async function checkAndroidUpdate(): Promise<{ version: string; downloadUrl: string } | null> {
+  const releaseUrl = props.settings.acceptUnstableUpdates
+    ? "https://api.github.com/repos/chlingzool/caretellia/releases"
+    : "https://api.github.com/repos/chlingzool/caretellia/releases/latest";
+
+  const response = await fetch(releaseUrl, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub release request failed with HTTP ${response.status}`);
+  }
+
+  const payload = props.settings.acceptUnstableUpdates
+    ? (await response.json()) as GitHubRelease[]
+    : ([await response.json()] as GitHubRelease[]);
+
+  const candidates = props.settings.acceptUnstableUpdates
+    ? payload.filter((release) => release.prerelease || release.tag_name.toLowerCase().includes("re"))
+    : payload.filter((release) => !release.prerelease);
+
+  const latestRelease = [...candidates].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+  if (!latestRelease) return null;
+
+  const releaseVersion = latestRelease.tag_name.replace(/^v/i, "");
+  if (!isVersionNewer(appVersion.value, releaseVersion)) return null;
+
+  const assetUrl = latestRelease.assets?.[0]?.browser_download_url ?? latestRelease.html_url;
+
+  return {
+    version: latestRelease.tag_name,
+    downloadUrl: assetUrl || latestRelease.html_url,
+  };
 }
 
 const props = defineProps<{
@@ -180,6 +242,43 @@ async function checkForUpdates() {
   let update: InstallableUpdate | null = null;
 
   try {
+    if (__TAURI_ENV_PLATFORM__ === "android") {
+      const androidRelease = await checkAndroidUpdate();
+      if (!androidRelease) {
+        updateMessage.value = props.settings.acceptUnstableUpdates
+          ? t("当前已是最新的不稳定版本。", "You are using the latest unstable version.")
+          : t("当前已是最新版本。", "You are using the latest version.");
+        return;
+      }
+
+      const shouldOpen = await requestConfirmation({
+        message: t(`发现新版本 ${androidRelease.version}，是否在默认浏览器中打开 GitHub 下载页？`, `Version ${androidRelease.version} is available. Open the GitHub download page in your default browser?`),
+        title: t("发现新版本", "Update available"),
+        kind: "info",
+        okLabel: t("打开下载页", "Open download page"),
+        cancelLabel: t("稍后", "Later"),
+      });
+
+      if (!shouldOpen) {
+        updateMessage.value = t(`已发现版本 ${androidRelease.version}，可稍后继续下载。`, `Version ${androidRelease.version} is available. You can download it later.`);
+        return;
+      }
+
+      if (typeof window !== "undefined" && "open" in window) {
+        window.open(androidRelease.downloadUrl, "_blank", "noopener,noreferrer");
+      }
+      try {
+        await openUrl(androidRelease.downloadUrl);
+      } catch (error) {
+        console.warn("Unable to open GitHub download URL with Tauri opener; falling back to browser window:", error);
+        if (typeof window !== "undefined") {
+          window.open(androidRelease.downloadUrl, "_blank", "noopener,noreferrer");
+        }
+      }
+      updateMessage.value = t(`已打开 ${androidRelease.version} 的 GitHub 下载页。`, `Opened the GitHub download page for ${androidRelease.version}.`);
+      return;
+    }
+
     update = props.settings.acceptUnstableUpdates
       ? await checkUnstableUpdate()
       : await check();
