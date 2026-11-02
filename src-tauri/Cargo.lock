@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "caretellia"
-version = "1.1.2"
+version = "1.1.3-re3"
 dependencies = [
  "cocoa",
  "fontconfig",
@@ -414,6 +414,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "url",
  "windows 0.58.0",
  "yeslogic-fontconfig-sys",
 ]

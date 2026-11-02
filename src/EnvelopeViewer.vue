@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { decodeClc, MAX_CLC_FILE_SIZE } from "./clc";
+import Popconfirm from "./components/Popconfirm.vue";
+import { showToast } from "./composables/toast";
 import {
   deleteViewedFile,
   listHistory,
@@ -11,11 +13,15 @@ import {
   type ViewedFile,
 } from "./letterHistory";
 import { locale, t } from "./i18n";
-import type { PostcardData } from "./types/postcard";
+import type { AppSettings, PostcardData } from "./types/postcard";
 import "./postcard-display.css";
 
 const emit = defineEmits<{ (event: "back"): void }>();
-const props = defineProps<{ recentViewLimit: number; initialFilePath?: string }>();
+const props = defineProps<{
+  recentViewLimit: number;
+  titleBarPosition?: AppSettings["titleBarPosition"];
+  initialFilePath?: string;
+}>();
 
 const history = ref<PostcardData[]>([]);
 const recentFiles = ref<ViewedFile[]>([]);
@@ -203,6 +209,7 @@ async function removeViewedFile(file: ViewedFile) {
     delete next[file.id];
     availableFiles.value = next;
     if (selectedCard.value?.id === file.id) selectedCard.value = null;
+    showToast(t("最近查看记录已移除。", "Recent entry removed."));
   } catch (error) {
     console.error("Unable to remove viewed-file placeholder:", error);
     errorMessage.value = t("无法移除这条最近查看记录。", "Could not remove this recently viewed entry.");
@@ -236,7 +243,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="viewer">
+  <div class="viewer" :data-titlebar-position="titleBarPosition ?? 'top'">
     <div class="command-bar">
       <button class="toolbar-btn" type="button" @click="emit('back')"><span aria-hidden="true">←</span> {{ t("返回", "Back") }}</button>
       <span class="command-divider"></span>
@@ -271,40 +278,45 @@ onMounted(async () => {
             <span>{{ recentFiles.length }} / {{ props.recentViewLimit }}</span>
           </summary>
           <p v-if="recentFiles.length === 0" class="viewer-empty">{{ t("查看本地 CLC 文件后会显示在这里，不会加入历史信件。", "Local CLC files appear here after viewing. They are not added to saved letters.") }}</p>
-          <article
-            v-for="file in recentFiles"
-            :key="file.id"
-            class="viewer-entry"
-            :class="{ missing: !availableFiles[file.id] }"
-          >
-            <button
-              v-if="availableFiles[file.id]"
-              class="viewer-entry-main"
-              type="button"
-              @click="selectViewedFile(file)"
+          <TransitionGroup name="viewer-list" tag="div" class="viewer-list">
+            <article
+              v-for="file in recentFiles"
+              :key="file.id"
+              class="viewer-entry"
+              :class="{ missing: !availableFiles[file.id] }"
             >
-              <strong><span class="file-mark" aria-hidden="true">▤</span>{{ file.name }}</strong>
-              <span>{{ new Date(file.viewedAt).toLocaleString(locale === "en" ? "en-US" : "zh-CN") }}</span>
-            </button>
-            <div v-else class="viewer-entry-main viewer-missing">
-              <strong><span class="file-mark" aria-hidden="true">▤</span>{{ file.name }}</strong>
-              <span>{{ t("文件已不存在", "File no longer exists") }}</span>
-            </div>
-            <button
-              v-if="!availableFiles[file.id]"
-              class="viewer-entry-remove"
-              type="button"
-              :aria-label="t(`从最近查看中移除 ${file.name}`, `Remove ${file.name} from recent files`)"
-              @click="removeViewedFile(file)"
-            >{{ t("移除记录", "Remove") }}</button>
-            <button
-              v-else
-              class="viewer-entry-remove"
-              type="button"
-              :aria-label="t(`删除最近查看记录 ${file.name}`, `Delete recent entry ${file.name}`)"
-              @click="removeViewedFile(file)"
-            >×</button>
-          </article>
+              <button
+                v-if="availableFiles[file.id]"
+                class="viewer-entry-main"
+                type="button"
+                @click="selectViewedFile(file)"
+              >
+                <strong><span class="file-mark" aria-hidden="true">▤</span>{{ file.name }}</strong>
+                <span>{{ new Date(file.viewedAt).toLocaleString(locale === "en" ? "en-US" : "zh-CN") }}</span>
+              </button>
+              <div v-else class="viewer-entry-main viewer-missing">
+                <strong><span class="file-mark" aria-hidden="true">▤</span>{{ file.name }}</strong>
+                <span>{{ t("文件已不存在", "File no longer exists") }}</span>
+              </div>
+              <Popconfirm
+                :title="t('移除最近查看记录', 'Remove recent entry')"
+                :message="t(`从最近查看中移除“${file.name}”？不会删除原始文件。`, `Remove “${file.name}” from recently viewed? The original file will not be deleted.`)"
+                :confirm-label="t('移除记录', 'Remove entry')"
+                danger
+                @confirm="removeViewedFile(file)"
+              >
+                <template #trigger="{ toggle, triggerAttributes }">
+                  <button
+                    v-bind="triggerAttributes"
+                    class="viewer-entry-remove"
+                    type="button"
+                    :aria-label="t(`从最近查看中移除 ${file.name}`, `Remove ${file.name} from recent files`)"
+                    @click="toggle($event)"
+                  >{{ availableFiles[file.id] ? "×" : t("移除记录", "Remove") }}</button>
+                </template>
+              </Popconfirm>
+            </article>
+          </TransitionGroup>
         </details>
       </aside>
 
@@ -394,12 +406,31 @@ onMounted(async () => {
 }
 
 .command-bar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
   display: flex;
   align-items: center;
   gap: 12px;
   min-height: 48px;
   margin-bottom: 22px;
   border-bottom: 1px solid var(--border);
+  background: var(--app-bg);
+}
+
+.viewer[data-titlebar-position="bottom"] .command-bar {
+  position: fixed;
+  z-index: 32;
+  right: max(24px, calc((100vw - 1240px) / 2 + 24px));
+  bottom: 0;
+  left: max(24px, calc((100vw - 1240px) / 2 + 24px));
+  top: auto;
+  min-height: 56px;
+  margin: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  background: var(--surface);
 }
 
 .command-context,
@@ -576,6 +607,28 @@ button.viewer-entry-main:hover strong {
   cursor: pointer;
 }
 
+.viewer-list {
+  position: relative;
+}
+
+.viewer-list-enter-active,
+.viewer-list-leave-active,
+.viewer-list-move {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.viewer-list-enter-from,
+.viewer-list-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.viewer-list-leave-active {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
 .viewer-entry-remove:hover {
   border-color: var(--border-strong);
   color: var(--accent);
@@ -683,6 +736,48 @@ button.viewer-entry-main:hover strong {
 }
 
 @media (max-width: 820px) {
+  .command-bar {
+    top: calc(56px + env(safe-area-inset-top, 0px));
+  }
+
+  .viewer[data-titlebar-position="bottom"] .command-bar,
+  .viewer[data-titlebar-position="narrow-bottom"] .command-bar {
+    top: auto;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    left: max(16px, env(safe-area-inset-left, 0px));
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+    background: var(--surface);
+  }
+
+  .viewer[data-titlebar-position="bottom"] .command-bar::-webkit-scrollbar,
+  .viewer[data-titlebar-position="narrow-bottom"] .command-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .viewer[data-titlebar-position="bottom"] .command-bar .toolbar-btn,
+  .viewer[data-titlebar-position="narrow-bottom"] .command-bar .toolbar-btn,
+  .viewer[data-titlebar-position="bottom"] .command-context,
+  .viewer[data-titlebar-position="narrow-bottom"] .command-context,
+  .viewer[data-titlebar-position="bottom"] .toolbar-segment,
+  .viewer[data-titlebar-position="narrow-bottom"] .toolbar-segment {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .viewer[data-titlebar-position="narrow-bottom"] .command-bar {
+    position: fixed;
+    z-index: 32;
+    bottom: 0;
+    min-height: calc(56px + env(safe-area-inset-bottom, 0px));
+    top: auto;
+    margin: 0;
+    padding: 6px 0;
+  }
+
   .viewer-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -698,7 +793,7 @@ button.viewer-entry-main:hover strong {
 
 }
 
-@media (max-width: 520px) {
+@media (max-width: 600px) {
   .command-bar {
     gap: 8px;
   }
