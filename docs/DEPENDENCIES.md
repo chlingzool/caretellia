@@ -34,6 +34,7 @@
 | `serde`、`serde_json` | Rust 与前端命令之间的数据序列化。 |
 | `tauri-plugin-dialog`、`tauri-plugin-opener`、`tauri-plugin-process` | 原生对话框、打开器和进程能力。 |
 | `tauri-plugin-updater` | Windows/macOS/Linux 桌面端更新插件。 |
+| `url` | 解析并校验桌面不稳定更新通道的 HTTPS manifest endpoint，供 Tauri updater builder 使用。 |
 | `tauri-plugin-single-instance` | Windows/Linux 单实例与文件打开转发。 |
 | `windows` | Windows 系统字体枚举所需 Win32 API。 |
 | `cocoa`、`objc` | macOS 系统字体枚举。 |

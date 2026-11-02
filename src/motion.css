@@ -1,0 +1,77 @@
+.app-shell .toolbar-btn:not(:disabled):active,
+.app-shell .home-card:not(:disabled):active,
+.app-shell .history-actions button:not(:disabled):active,
+.editor .btn-primary:not(:disabled):active,
+.editor .btn-secondary:not(:disabled):active,
+.settings-page button:not(:disabled):active,
+.viewer .toolbar-btn:not(:disabled):active,
+.template-gallery button:not(:disabled):active {
+  filter: brightness(0.96);
+}
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.modal-enter-active > *,
+.modal-leave-active > * {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-enter-from > *,
+.modal-leave-to > * {
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+}
+
+.popover-enter-active,
+.popover-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  transform-origin: top right;
+}
+
+.popover-enter-from,
+.popover-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.99);
+}
+
+.operation-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: operation-spinner 0.75s linear infinite;
+  vertical-align: -2px;
+}
+
+@keyframes operation-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .operation-spinner {
+    animation: none;
+    border-right-color: currentColor;
+  }
+}

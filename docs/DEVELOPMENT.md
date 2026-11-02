@@ -19,6 +19,16 @@
 
 建议先查看 [架构与跨文件修改清单](./ARCHITECTURE.md)，避免只改共享模型、CLC 编解码器或 Rust 命令的一侧。
 
+## 应用内菜单与弹窗
+
+移动端标题栏菜单以 Vue Drawer 展示；表单下拉、HSV 正方形颜色面板、Popconfirm、Dialog 和 Toast 也使用 Vue 组件，避免应用内依赖系统原生表单/确认控件。滚动条统一应用主题化的 CSS 样式，并使用 `scrollbar-gutter: stable` 在模态/抽屉锁定背景滚动时保留布局空间；页面仍使用浏览器滚动、键盘和触控行为。操作反馈按语义选型：保存、导入、导出等成功结果用底部 Toast，底部进度条显示剩余时间并在悬停/聚焦时暂停；失败原因留在对应页面的 Inline Alert，避免短时提示消失或与持久错误重复；桌面轻量危险操作用贴近触发控件的 Popconfirm，窄屏改为 Bottom Sheet；清空全部数据、安装更新等关键决策才使用居中 Dialog，点击遮罩不会取消，使用取消按钮、Escape 或 Android 返回键关闭。清除全部数据的确认按钮在 Dialog 打开后延迟 5 秒启用。新增交互时复用 `src/components/Popconfirm.vue`、`src/components/ToastHost.vue`、`src/components/AppSelect.vue`、`src/components/AppColorPicker.vue` 及 `src/composables/confirmationDialog.ts` / `src/composables/toast.ts`，保持键盘操作、焦点管理、Android 返回键与可访问状态播报。场景切换在主内容区播放短入场过渡而不重建包裹 `KeepAlive` 的编辑器，并尊重系统“减少动态效果”偏好。设置页分区导航会跟随页面滚动更新当前焦点分区。访问用户文件或保存路径仍使用 Tauri/浏览器文件选择器；这些系统文件界面用于授权本机文件访问。
+
+## 标题栏与窄屏编辑器预览
+
+“标题栏位置”设置控制应用顶部 Header（Caretellia 品牌栏）以及页面内的导航 command-bar：可将 Header 固定在上方、固定在下方，或仅在窄屏固定在下方；默认保持上方。为保留此前的页面导航栏位置行为，command-bar 也跟随该选项，在底部模式下与 Header 分层排列。设置页的大分类导航会在底部品牌栏模式下贴合到内容顶部，避免出现额外留白；窄屏编辑器的预览固定在保存、重置、另存为和导出操作栏上方，可折叠展开；“手机预览默认状态”设置选择打开编辑器时默认展开或折叠，桌面预览不受该设置影响。底部标题栏模式下，预览栏、编辑操作栏、command-bar 和 Header 从上至下堆叠，避免互相遮挡。预览定位相对于视口，而不是编辑器的容器；拖动预览宽度时会将尺寸锁定在可见区域内，避免在较窄窗口下被推出屏幕。预览宽度拖动柄及字号滑块不显示焦点边框，但键盘操作仍有焦点状态提示。
+
+设置中的“接受不稳定更新”默认关闭。桌面版开启后，更新检查改为读取 GitHub `unstable` 预发布清单，关闭后恢复稳定 Release 通道；两种通道都使用 Tauri updater 的签名校验。该设置不改变已安装版本，Android/iOS 和浏览器版不提供应用内安装。
+
 ## 常用命令
 
 从仓库根目录运行：

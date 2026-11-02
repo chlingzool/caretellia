@@ -2,6 +2,11 @@ name: macos-ios-build
 
 on:
   workflow_call:
+    inputs:
+      release_channel:
+        required: false
+        type: string
+        default: stable
 
 permissions:
   contents: write
@@ -47,8 +52,8 @@ jobs:
           tagName: app-v__VERSION__
           releaseName: 'App v__VERSION__'
           releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
+          releaseDraft: ${{ inputs.release_channel != 'unstable' }}
+          prerelease: ${{ inputs.release_channel == 'unstable' }}
           args: --target ${{ matrix.target }}
 
       - name: upload macOS artifacts

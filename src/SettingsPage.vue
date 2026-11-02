@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { getVersion } from "@tauri-apps/api/app";
-import { isTauri } from "@tauri-apps/api/core";
-import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { Channel, invoke, isTauri, Resource } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
-import { computed, onMounted, ref } from "vue";
+import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import AppSelect from "./components/AppSelect.vue";
 import { DEFAULT_FONT_FAMILIES, SYSTEM_DEFAULT_FONT, useSystemFonts } from "./composables/useSystemFonts";
+import { requestConfirmation } from "./composables/confirmationDialog";
 import { t } from "./i18n";
 import { clearAllLocalData } from "./letterHistory";
 import type { AppSettings } from "./types/postcard";
@@ -26,6 +27,21 @@ const updateError = ref(false);
 const clearingData = ref(false);
 const clearDataMessage = ref("");
 const clearDataError = ref(false);
+
+interface UpdateMetadata {
+  rid: number;
+  currentVersion: string;
+  version: string;
+  date?: string;
+  body?: string;
+  rawJson: Record<string, unknown>;
+}
+
+interface InstallableUpdate {
+  version: string;
+  downloadAndInstall(onEvent?: (event: DownloadEvent) => void): Promise<void>;
+  close(): Promise<void>;
+}
 
 const props = defineProps<{
   settings: AppSettings;
@@ -84,12 +100,62 @@ function updateSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K
   emit("update:settings", { ...settings, [key]: value });
 }
 
+function updateLocale(value: string) {
+  if (value === "system" || value === "zh" || value === "en") {
+    updateSetting("locale", value, props.settings);
+  }
+}
+
+function updateExportColorMode(value: string) {
+  if (value === "light" || value === "dark" || value === "system") {
+    updateSetting("exportColorMode", value, props.settings);
+  }
+}
+
+function updateTitleBarPosition(value: string) {
+  if (value === "top" || value === "bottom" || value === "narrow-bottom") {
+    updateSetting("titleBarPosition", value, props.settings);
+  }
+}
+
+function updateMobilePreviewDefault(value: string) {
+  if (value === "expanded" || value === "collapsed") {
+    updateSetting("mobilePreviewDefault", value, props.settings);
+  }
+}
+
+function updateRecentViewedLimit(value: string) {
+  const limit = Number(value);
+  if ([5, 10, 20, 30].includes(limit)) {
+    updateSetting("recentViewedLimit", limit, props.settings);
+  }
+}
+
 function navigateToSection(id: SettingsSectionId) {
   activeSection.value = id;
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function updateActiveSection() {
+  const sectionIds = sections.value.map(({ id }) => id);
+  const activeLine = Math.min(window.innerHeight * 0.35, 240);
+  const current = sectionIds
+    .map((id) => document.getElementById(id))
+    .filter((element): element is HTMLElement => element instanceof HTMLElement)
+    .reduce<HTMLElement | null>((active, element) =>
+      element.getBoundingClientRect().top <= activeLine ? element : active, null);
+  if (current) activeSection.value = current.id as SettingsSectionId;
+  else activeSection.value = sectionIds[0];
+
+  if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) {
+    activeSection.value = sectionIds[sectionIds.length - 1];
+  }
+}
+
 onMounted(() => {
+  window.addEventListener("scroll", updateActiveSection, { passive: true });
+  window.addEventListener("resize", updateActiveSection);
+  updateActiveSection();
   if (isTauri()) {
     void getVersion().then((version) => {
       appVersion.value = version;
@@ -100,30 +166,37 @@ onMounted(() => {
   }
 });
 
+onBeforeUnmount(() => {
+  window.removeEventListener("scroll", updateActiveSection);
+  window.removeEventListener("resize", updateActiveSection);
+});
+
 async function checkForUpdates() {
   if (!canCheckUpdates || updateBusy.value) return;
 
   updateBusy.value = true;
   updateError.value = false;
   updateMessage.value = t("正在检查更新…", "Checking for updates…");
-  let update: Awaited<ReturnType<typeof check>> = null;
+  let update: InstallableUpdate | null = null;
 
   try {
-    update = await check();
+    update = props.settings.acceptUnstableUpdates
+      ? await checkUnstableUpdate()
+      : await check();
     if (!update) {
-      updateMessage.value = t("当前已是最新版本。", "You are using the latest version.");
+      updateMessage.value = props.settings.acceptUnstableUpdates
+        ? t("当前已是最新的不稳定版本。", "You are using the latest unstable version.")
+        : t("当前已是最新版本。", "You are using the latest version.");
       return;
     }
 
-    const shouldInstall = await confirmDialog(
-      t(`发现新版本 ${update.version}，现在下载并安装吗？`, `Version ${update.version} is available. Download and install it now?`),
-      {
-        title: t("发现新版本", "Update available"),
-        kind: "info",
-        okLabel: t("立即更新", "Update now"),
-        cancelLabel: t("稍后", "Later"),
-      },
-    );
+    const shouldInstall = await requestConfirmation({
+      message: t(`发现新版本 ${update.version}，现在下载并安装吗？`, `Version ${update.version} is available. Download and install it now?`),
+      title: t("发现新版本", "Update available"),
+      kind: "info",
+      okLabel: t("立即更新", "Update now"),
+      cancelLabel: t("稍后", "Later"),
+    });
     if (!shouldInstall) {
       updateMessage.value = t(`已发现版本 ${update.version}，可稍后再次检查。`, `Version ${update.version} is available. You can check again later.`);
       return;
@@ -165,28 +238,48 @@ async function checkForUpdates() {
   }
 }
 
+async function checkUnstableUpdate(): Promise<InstallableUpdate | null> {
+  const metadata = await invoke<UpdateMetadata | null>("check_unstable_update");
+  if (!metadata) return null;
+
+  const resource = new Resource(metadata.rid);
+  return {
+    version: metadata.version,
+    async downloadAndInstall(onEvent) {
+      const channel = new Channel<DownloadEvent>();
+      if (onEvent) channel.onmessage = onEvent;
+      await invoke("plugin:updater|download_and_install", {
+        rid: metadata.rid,
+        onEvent: channel,
+      });
+    },
+    close: () => resource.close(),
+  };
+}
+
 async function clearStoredData() {
   if (clearingData.value) return;
 
   try {
-    const confirmed = await confirmDialog(
-      t(
+    const confirmed = await requestConfirmation({
+      message: t(
         "此操作会永久删除本机保存的全部信件、最近查看记录和应用设置，且无法撤销。已导出到其他位置的文件不会被删除。确定继续吗？",
         "This permanently deletes all letters, recently viewed entries, and app settings stored on this device. This cannot be undone. Exported files elsewhere will not be deleted. Continue?",
       ),
-      {
-        title: t("清除全部数据", "Clear all data"),
-        kind: "warning",
-        okLabel: t("清除全部数据", "Clear all data"),
-        cancelLabel: t("取消", "Cancel"),
-      },
-    );
+      title: t("清除全部数据", "Clear all data"),
+      kind: "warning",
+      okLabel: t("清除全部数据", "Clear all data"),
+      cancelLabel: t("取消", "Cancel"),
+      confirmDelayMs: 5000,
+    });
     if (!confirmed) return;
 
     clearingData.value = true;
     clearDataError.value = false;
     clearDataMessage.value = t("正在清除本机数据…", "Clearing local data…");
     await clearAllLocalData();
+    clearDataMessage.value = t("本机数据已清除，正在重新加载…", "Local data cleared. Reloading…");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 900));
     window.location.reload();
   } catch (error) {
     console.error("Unable to clear local app data:", error);
@@ -225,21 +318,29 @@ async function clearStoredData() {
 
           <label class="setting-row">
             <span class="setting-copy"><strong>{{ t("显示语言", "Display language") }}</strong><small>{{ t("选择应用界面语言", "Choose the language used throughout the app") }}</small></span>
-            <select :value="settings.locale" @change="updateSetting('locale', ($event.target as HTMLSelectElement).value as AppSettings['locale'], settings)">
-              <option value="system">{{ t("跟随系统", "Follow system") }}</option>
-              <option value="zh">简体中文</option>
-              <option value="en">English</option>
-            </select>
+            <AppSelect
+              :model-value="settings.locale"
+              :options="[
+                { value: 'system', label: t('跟随系统', 'Follow system') },
+                { value: 'zh', label: '简体中文' },
+                { value: 'en', label: 'English' },
+              ]"
+              :aria-label="t('显示语言', 'Display language')"
+              @change="updateLocale"
+            />
           </label>
 
           <label class="setting-row">
             <span class="setting-copy"><strong>{{ t("界面字体", "Interface font") }}</strong><small>{{ t("使用之前检测到的本机字体列表", "Choose from fonts detected on this device") }}</small></span>
             <span class="font-select-wrap">
-              <select :value="settings.uiFont" @change="updateSetting('uiFont', ($event.target as HTMLSelectElement).value, settings)">
-                <option :value="SYSTEM_DEFAULT_FONT">{{ t("系统默认", "System default") }}</option>
-                <option v-if="!currentFontIsListed" :value="settings.uiFont">{{ t("当前字体", "Current font") }}</option>
-                <option v-for="font in fontOptions.slice(1)" :key="font.value" :value="font.value">{{ font.label }}</option>
-              </select>
+              <AppSelect
+                :model-value="settings.uiFont"
+                :options="currentFontIsListed
+                  ? fontOptions
+                  : [fontOptions[0], { label: t('当前字体', 'Current font'), value: settings.uiFont }, ...fontOptions.slice(1)]"
+                :aria-label="t('界面字体', 'Interface font')"
+                @change="updateSetting('uiFont', $event, settings)"
+              />
               <span class="font-list-status" role="status" aria-live="polite">{{ fontStatus }}</span>
               <button type="button" class="font-refresh" :disabled="isFontLoading" @click="refreshSystemFonts">
                 {{ isFontLoading ? t("读取中…", "Loading…") : t("刷新字体", "Refresh fonts") }}
@@ -261,6 +362,34 @@ async function clearStoredData() {
               <output>{{ props.settings.uiFontSize }} px</output>
             </span>
           </label>
+
+          <label class="setting-row">
+            <span class="setting-copy"><strong>{{ t("标题栏位置", "Title bar position") }}</strong><small>{{ t("设置各页面导航标题栏固定在屏幕上方或下方", "Choose where the navigation title bar stays fixed across pages") }}</small></span>
+            <AppSelect
+              :model-value="settings.titleBarPosition"
+              :options="[
+                { value: 'top', label: t('一直上方', 'Always at top') },
+                { value: 'bottom', label: t('一直下方', 'Always at bottom') },
+                { value: 'narrow-bottom', label: t('仅窄屏幕下方', 'Bottom on narrow screens only') },
+              ]"
+              :aria-label="t('标题栏位置', 'Title bar position')"
+              @change="updateTitleBarPosition"
+            />
+          </label>
+
+          <label class="setting-row">
+            <span class="setting-copy"><strong>{{ t("手机预览默认状态", "Mobile preview default") }}</strong><small>{{ t("选择编辑信件时底部预览栏默认展开或折叠", "Choose whether the pinned editor preview starts expanded or collapsed on narrow screens") }}</small></span>
+            <AppSelect
+              :model-value="settings.mobilePreviewDefault"
+              :options="[
+                { value: 'expanded', label: t('默认展开', 'Expanded by default') },
+                { value: 'collapsed', label: t('默认折叠', 'Collapsed by default') },
+              ]"
+              :aria-label="t('手机预览默认状态', 'Mobile preview default')"
+              @change="updateMobilePreviewDefault"
+            />
+          </label>
+
         </section>
 
         <section id="settings-export" class="settings-section">
@@ -281,14 +410,16 @@ async function clearStoredData() {
           <p class="setting-hint">{{ t("路径仅保存在本机。留空时使用应用默认导出目录。", "The path is stored locally. Leave it blank to use the default export folder.") }}</p>
           <label class="setting-row export-mode-row">
             <span class="setting-copy"><strong>{{ t("导出页面配色", "Export page theme") }}</strong><small>{{ t("只改变导出页面背景和标题，不改变信件设计本身", "Changes the export page background and title only, not the letter design") }}</small></span>
-            <select
-              :value="settings.exportColorMode"
-              @change="updateSetting('exportColorMode', ($event.target as HTMLSelectElement).value as AppSettings['exportColorMode'], settings)"
-            >
-              <option value="light">{{ t("浅色", "Light") }}</option>
-              <option value="dark">{{ t("深色", "Dark") }}</option>
-              <option value="system">{{ t("跟随系统", "System") }}</option>
-            </select>
+            <AppSelect
+              :model-value="settings.exportColorMode"
+              :options="[
+                { value: 'light', label: t('浅色', 'Light') },
+                { value: 'dark', label: t('深色', 'Dark') },
+                { value: 'system', label: t('跟随系统', 'System') },
+              ]"
+              :aria-label="t('导出页面配色', 'Export page theme')"
+              @change="updateExportColorMode"
+            />
           </label>
           <p v-if="exportDirectoryError" class="setting-error" role="alert">{{ exportDirectoryError }}</p>
         </section>
@@ -298,22 +429,25 @@ async function clearStoredData() {
           <p class="section-description">{{ t("信件与界面偏好保存在本机浏览器存储中，不会上传到网络。", "Letters and preferences are stored in this browser on your device and are never uploaded.") }}</p>
           <label class="setting-row">
             <span class="setting-copy"><strong>{{ t("最近查看保留数量", "Recently viewed limit") }}</strong><small>{{ t("超出数量时自动移除最早的本地文件记录", "Oldest local file entries are removed when the limit is exceeded") }}</small></span>
-            <select
-              :value="settings.recentViewedLimit"
-              @change="updateSetting('recentViewedLimit', Number(($event.target as HTMLSelectElement).value), settings)"
-            >
-              <option :value="5">{{ t("5 封", "5 letters") }}</option>
-              <option :value="10">{{ t("10 封", "10 letters") }}</option>
-              <option :value="20">{{ t("20 封", "20 letters") }}</option>
-              <option :value="30">{{ t("30 封", "30 letters") }}</option>
-            </select>
+            <AppSelect
+              :model-value="String(settings.recentViewedLimit)"
+              :options="[
+                { value: '5', label: t('5 封', '5 letters') },
+                { value: '10', label: t('10 封', '10 letters') },
+                { value: '20', label: t('20 封', '20 letters') },
+                { value: '30', label: t('30 封', '30 letters') },
+              ]"
+              :aria-label="t('最近查看保留数量', 'Recently viewed limit')"
+              @change="updateRecentViewedLimit"
+            />
           </label>
           <div class="setting-row clear-data-row">
             <span class="setting-copy">
               <strong>{{ t("清除全部数据", "Clear all data") }}</strong>
               <small>{{ t("删除本机保存的信件、最近查看记录和应用设置；已导出的文件不受影响。", "Delete locally saved letters, recent entries, and app settings. Exported files are not affected.") }}</small>
             </span>
-            <button class="clear-data-button" type="button" :disabled="clearingData" @click="clearStoredData">
+            <button class="clear-data-button" type="button" :disabled="clearingData" :aria-busy="clearingData" @click="clearStoredData">
+              <span v-if="clearingData" class="operation-spinner" aria-hidden="true"></span>
               {{ clearingData ? t("正在清除…", "Clearing…") : t("清除全部数据", "Clear all data") }}
             </button>
           </div>
@@ -322,7 +456,7 @@ async function clearStoredData() {
 
         <section id="settings-updates" class="settings-section">
           <h2>{{ t("更新", "Updates") }}</h2>
-          <p class="section-description">{{ t("检查 GitHub 上已发布的稳定版本，并可在桌面应用内完成更新。", "Check published stable releases on GitHub and update directly in the desktop app.") }}</p>
+          <p class="section-description">{{ t("检查已发布的更新，并可在桌面应用内完成更新。", "Check published updates and install them directly in the desktop app.") }}</p>
           <div class="setting-row">
             <span class="setting-copy">
               <strong>{{ t("当前版本", "Current version") }}</strong>
@@ -332,13 +466,32 @@ async function clearStoredData() {
               <strong>{{ versionParts.core }}</strong><small v-if="versionParts.suffix" class="version-suffix">{{ versionParts.suffix }}</small>
             </span>
           </div>
+          <div class="setting-row update-channel-row">
+            <span class="setting-copy">
+              <strong>{{ t("接受不稳定更新", "Accept unstable updates") }}</strong>
+              <small>{{ t("开启后会检查 GitHub 预发布版本；这些版本可能存在问题。关闭后恢复稳定版本更新。", "When enabled, checks GitHub pre-releases that may contain issues. Turn it off to return to stable updates.") }}</small>
+            </span>
+            <button
+              class="update-channel-switch"
+              type="button"
+              role="switch"
+              :disabled="!canCheckUpdates || updateBusy"
+              :aria-checked="settings.acceptUnstableUpdates"
+              :aria-label="t('接受不稳定更新', 'Accept unstable updates')"
+              @click="updateSetting('acceptUnstableUpdates', !settings.acceptUnstableUpdates, settings)"
+            >
+              <span class="update-channel-switch-thumb"></span>
+              <span>{{ settings.acceptUnstableUpdates ? t("开启", "On") : t("关闭", "Off") }}</span>
+            </button>
+          </div>
           <div class="setting-row update-check-row">
             <span class="setting-copy">
               <strong>{{ t("检查更新", "Check for updates") }}</strong>
-              <small>{{ canCheckUpdates ? t("仅安装已发布的稳定版本；更新包会先验证签名。", "Only published stable releases are installed; update signatures are verified first.") : t("应用内自动更新仅支持 Windows、macOS 和 Linux 桌面版。", "In-app updates are available only on Windows, macOS, and Linux desktop builds.") }}</small>
+              <small>{{ canCheckUpdates ? (settings.acceptUnstableUpdates ? t("当前通道：GitHub 预发布；更新包会先验证签名。", "Current channel: GitHub pre-releases. Update signatures are verified first.") : t("当前通道：GitHub 稳定版；更新包会先验证签名。", "Current channel: GitHub stable releases. Update signatures are verified first.")) : t("应用内自动更新仅支持 Windows、macOS 和 Linux 桌面版。", "In-app updates are available only on Windows, macOS, and Linux desktop builds.") }}</small>
             </span>
-            <button class="browse-button update-check" type="button" :disabled="!canCheckUpdates || updateBusy" @click="checkForUpdates">
-              {{ updateBusy ? t("处理中…", "Working…") : t("检查更新", "Check for updates") }}
+            <button class="browse-button update-check" type="button" :disabled="!canCheckUpdates || updateBusy" :aria-busy="updateBusy" @click="checkForUpdates">
+              <span v-if="updateBusy" class="operation-spinner" aria-hidden="true"></span>
+              {{ updateBusy ? t("处理中…", "Working…") : settings.acceptUnstableUpdates ? t("检查不稳定更新", "Check unstable updates") : t("检查更新", "Check for updates") }}
             </button>
           </div>
           <p v-if="updateMessage" class="update-status" :class="{ 'setting-error': updateError }" :role="updateError ? 'alert' : 'status'" aria-live="polite">{{ updateMessage }}</p>
@@ -395,6 +548,11 @@ h1 {
   gap: 3px;
   padding: 6px 0;
   border-right: 1px solid var(--border);
+}
+
+.app-shell[data-titlebar-position="bottom"] .settings-nav,
+.app-shell[data-titlebar-position="narrow-bottom"] .settings-nav {
+  top: 0;
 }
 
 .settings-nav button {
@@ -465,7 +623,7 @@ h1 {
   font-size: 0.7857em;
 }
 
-.setting-row select,
+.setting-row :deep(.app-select-trigger),
 .directory-control input {
   min-height: 36px;
   padding: 7px 10px;
@@ -484,7 +642,7 @@ h1 {
   width: min(380px, 55%);
 }
 
-.font-select-wrap select {
+.font-select-wrap :deep(.app-select) {
   grid-column: 1 / -1;
   width: 100%;
 }
@@ -521,7 +679,7 @@ h1 {
   border-top: 1px solid var(--border);
 }
 
-.setting-row select {
+.setting-row :deep(.app-select) {
   width: min(280px, 50%);
 }
 
@@ -535,10 +693,68 @@ h1 {
   accent-color: var(--accent);
 }
 
+.font-size-control input:focus-visible {
+  outline: none;
+}
+
+.font-size-control input:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--accent);
+}
+
+.font-size-control input:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--accent);
+}
+
 .font-size-control output {
   min-width: 48px;
   color: var(--muted);
   font-size: 0.8571em;
+}
+
+.update-channel-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 90px;
+  min-height: 40px;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.86em;
+  cursor: pointer;
+}
+
+.update-channel-switch[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.update-channel-switch-thumb {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 0.16s ease, background-color 0.16s ease;
+}
+
+.update-channel-switch[aria-checked="true"] .update-channel-switch-thumb {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.update-channel-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.update-channel-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .directory-control {
@@ -656,6 +872,11 @@ h1 {
     box-shadow: 0 5px 12px rgb(20 30 40 / 7%);
   }
 
+  .app-shell[data-titlebar-position="bottom"] .settings-nav,
+  .app-shell[data-titlebar-position="narrow-bottom"] .settings-nav {
+    top: 0;
+  }
+
   .settings-nav button {
     flex: 0 0 auto;
     min-height: 44px;
@@ -679,7 +900,7 @@ h1 {
     gap: 10px;
   }
 
-  .setting-row select {
+  .setting-row :deep(.app-select) {
     width: 100%;
   }
 
@@ -689,7 +910,7 @@ h1 {
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .setting-row select,
+  .setting-row :deep(.app-select-trigger),
   .directory-control input,
   .browse-button,
   .clear-data-button,

@@ -2,12 +2,16 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, onDeactivated, nextTick, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import AppColorPicker from "./components/AppColorPicker.vue";
+import AppSelect from "./components/AppSelect.vue";
 import FontSelect from "./components/FontSelect.vue";
+import Popconfirm from "./components/Popconfirm.vue";
+import { showToast } from "./composables/toast";
 import { DEFAULT_FONT_FAMILIES, SYSTEM_DEFAULT_FONT, useSystemFonts } from "./composables/useSystemFonts";
 import { locale, t } from "./i18n";
 import { encodeClc } from "./clc";
 import { listHistory, saveHistoryCard } from "./letterHistory";
-import type { LetterSticker, LetterTemplate, PostcardData } from "./types/postcard";
+import type { AppSettings, LetterSticker, LetterTemplate, PostcardData } from "./types/postcard";
 import postcardDisplayStyles from "./postcard-display.css?inline";
 import "./postcard-display.css";
 
@@ -18,6 +22,8 @@ const props = defineProps<{
   editorSessionId?: string;
   exportDirectory?: string;
   exportColorMode?: "light" | "dark" | "system";
+  titleBarPosition?: AppSettings["titleBarPosition"];
+  mobilePreviewDefault?: AppSettings["mobilePreviewDefault"];
 }>();
 
 const emit = defineEmits<{
@@ -71,6 +77,7 @@ const letterCanvas = ref<HTMLElement | null>(null);
 const historyError = ref("");
 const exportError = ref("");
 const exportMenuOpen = ref(false);
+const saveBusy = ref(false);
 const exportBusy = ref(false);
 const selectedStickerId = ref<string | null>(null);
 type StickerInteraction = {
@@ -176,8 +183,9 @@ function endStickerInteraction() {
 }
 
 function removeSticker(stickerId: string) {
-  form.stickers = (form.stickers ?? []).filter((sticker) => sticker.id !== stickerId);
+  form.stickers = (form.stickers ?? []).filter((item) => item.id !== stickerId);
   selectedStickerId.value = null;
+  showToast(t("贴纸已移除。", "Sticker removed."));
 }
 
 function updateStickerAspect(sticker: LetterSticker, event: Event) {
@@ -257,6 +265,20 @@ const isFlipped = ref(false);
 const editorElement = ref<HTMLElement | null>(null);
 const previewWidth = ref(46);
 const isResizingPreview = ref(false);
+const isMobilePreviewCollapsed = ref(props.mobilePreviewDefault === "collapsed");
+const PREVIEW_MIN_WIDTH = 330;
+const PREVIEW_FRAME_MARGIN = 16;
+
+function clampPreviewWidthPercent(value: number) {
+  return Math.min(68, Math.max(34, value));
+}
+
+watch(
+  () => props.mobilePreviewDefault,
+  (nextDefault) => {
+    isMobilePreviewCollapsed.value = nextDefault === "collapsed";
+  },
+);
 
 let envelopeTransitionTimer: number | undefined;
 
@@ -408,6 +430,11 @@ function resetForm() {
   onTypeChange();
 }
 
+function resetDraft() {
+  resetForm();
+  showToast(t("草稿已重置。", "Draft reset."));
+}
+
 function rememberFonts(...fonts: string[]) {
   const combined = new Set([...preservedFontOptions.value, ...fonts.filter(Boolean)]);
   preservedFontOptions.value = [...combined];
@@ -434,8 +461,18 @@ function applyTemplate(template: LetterTemplate) {
 function updatePreviewWidth(event: PointerEvent) {
   const editor = editorElement.value;
   if (!editor) return;
+
   const bounds = editor.getBoundingClientRect();
-  previewWidth.value = Math.min(68, Math.max(34, ((bounds.right - event.clientX) / bounds.width) * 100));
+  const maxPreviewWidthPx = Math.min(
+    bounds.width - 24,
+    Math.max(PREVIEW_MIN_WIDTH, window.innerWidth - bounds.left - PREVIEW_FRAME_MARGIN),
+  );
+  const nextPreviewWidthPx = Math.min(
+    Math.max(bounds.right - event.clientX, PREVIEW_MIN_WIDTH),
+    maxPreviewWidthPx,
+  );
+
+  previewWidth.value = clampPreviewWidthPercent((nextPreviewWidthPx / bounds.width) * 100);
 }
 
 function stopPreviewResize() {
@@ -456,20 +493,29 @@ function startPreviewResize(event: PointerEvent) {
 function adjustPreviewWidth(event: KeyboardEvent) {
   if (event.key === "ArrowLeft") {
     event.preventDefault();
-    previewWidth.value = Math.min(68, previewWidth.value + 2);
+    previewWidth.value = clampPreviewWidthPercent(previewWidth.value + 2);
   } else if (event.key === "ArrowRight") {
     event.preventDefault();
-    previewWidth.value = Math.max(34, previewWidth.value - 2);
+    previewWidth.value = clampPreviewWidthPercent(previewWidth.value - 2);
   }
 }
 
+function toggleMobilePreview() {
+  isMobilePreviewCollapsed.value = !isMobilePreviewCollapsed.value;
+}
+
 async function handleSave() {
+  if (saveBusy.value) return;
+  saveBusy.value = true;
   try {
     await saveToStorage();
     emit("save", { ...form });
+    showToast(t("信件已保存到历史记录。", "Letter saved to history."));
   } catch (error) {
     console.error("Unable to save letter:", error);
     historyError.value = t("保存失败，请检查本机存储空间后重试。", "Could not save the letter. Check local storage and try again.");
+  } finally {
+    saveBusy.value = false;
   }
 }
 
@@ -711,6 +757,7 @@ async function exportClc() {
       downloadFile(new Blob([downloadBytes.buffer], { type: "application/octet-stream" }), fileName);
     }
     emit("export", { ...form });
+    showToast(t("CLC 文件已导出。", "CLC file exported."));
   } catch (error) {
     console.error("CLC export failed:", error);
     exportError.value = t("CLC 导出失败，请检查信件内容后重试。", "CLC export failed. Check the letter content and try again.");
@@ -788,6 +835,7 @@ async function saveClcAs() {
       }
     }
     emit("export", { ...form });
+    showToast(t("文件已保存。", "File saved."));
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
     console.error("Save CLC as failed:", error);
@@ -815,6 +863,7 @@ async function exportHTML() {
       downloadFile(new Blob([html], { type: "text/html" }), fileName);
     }
     emit("export", { ...form });
+    showToast(t("HTML 文件已导出。", "HTML file exported."));
   } catch (error) {
     console.error("HTML export failed:", error);
     exportError.value = t("HTML 导出失败，请重试。", "HTML export failed. Please try again.");
@@ -895,7 +944,17 @@ onDeactivated(() => {
 </script>
 
 <template>
-  <div ref="editorElement" class="editor" :class="{ 'resizing-preview': isResizingPreview }" :style="{ '--preview-width': `${previewWidth}%` }">
+  <div
+    ref="editorElement"
+    class="editor"
+    :class="{
+      'resizing-preview': isResizingPreview,
+      'titlebar-always-bottom': titleBarPosition === 'bottom',
+      'titlebar-narrow-bottom': titleBarPosition === 'narrow-bottom',
+      'mobile-preview-collapsed': isMobilePreviewCollapsed,
+    }"
+    :style="{ '--preview-width': `${previewWidth}%` }"
+  >
     <div class="editor-body">
       <section class="form-section">
         <header class="section-heading">
@@ -906,11 +965,16 @@ onDeactivated(() => {
         <div class="form-grid">
           <div class="field">
             <label>{{ t("类型", "Format") }}</label>
-            <select v-model="form.type" @change="onTypeChange">
-              <option value="envelope">{{ t("信封", "Envelope") }}</option>
-              <option value="postcard">{{ t("明信片", "Postcard") }}</option>
-              <option value="letter">{{ t("信纸", "Letter sheet") }}</option>
-            </select>
+            <AppSelect
+              v-model="form.type"
+              :options="[
+                { value: 'envelope', label: t('信封', 'Envelope') },
+                { value: 'postcard', label: t('明信片', 'Postcard') },
+                { value: 'letter', label: t('信纸', 'Letter sheet') },
+              ]"
+              :aria-label="t('类型', 'Format')"
+              @change="onTypeChange"
+            />
           </div>
           <div class="field">
             <label>{{ t("标题", "Title") }} ({{ form.title.length }}/{{ MAX.title }})</label>
@@ -1079,34 +1143,59 @@ onDeactivated(() => {
         <div class="form-grid">
           <div class="field">
             <label>{{ t("背景色", "Background color") }}</label>
-            <input type="color" v-model="form.bgColor" />
+            <AppColorPicker v-model="form.bgColor" :label="t('背景色', 'background color')" />
           </div>
           <div class="field">
             <label>{{ t("文字颜色", "Text color") }}</label>
-            <input type="color" v-model="form.textColor" />
+            <AppColorPicker v-model="form.textColor" :label="t('文字颜色', 'text color')" />
           </div>
           <div class="field">
             <label>{{ t("边框样式", "Border style") }}</label>
-            <select v-model="form.borderStyle">
-              <option value="solid">{{ t("实线", "Solid") }}</option>
-              <option value="dashed">{{ t("虚线", "Dashed") }}</option>
-              <option value="double">{{ t("双线", "Double") }}</option>
-              <option value="dotted">{{ t("点线", "Dotted") }}</option>
-            </select>
+            <AppSelect
+              v-model="form.borderStyle"
+              :options="[
+                { value: 'solid', label: t('实线', 'Solid') },
+                { value: 'dashed', label: t('虚线', 'Dashed') },
+                { value: 'double', label: t('双线', 'Double') },
+                { value: 'dotted', label: t('点线', 'Dotted') },
+              ]"
+              :aria-label="t('边框样式', 'Border style')"
+            />
           </div>
           <div class="field">
             <label>{{ t("边框颜色", "Border color") }}</label>
-            <input type="color" v-model="form.borderColor" />
+            <AppColorPicker v-model="form.borderColor" :label="t('边框颜色', 'border color')" />
           </div>
         </div>
       </section>
 
       <div class="actions">
-        <button class="btn-primary" @click="handleSave">{{ t("保存", "Save") }}</button>
-        <button class="btn-secondary" @click="resetForm">{{ t("重置", "Reset") }}</button>
-        <button class="btn-secondary" type="button" @click="saveClcAs" :disabled="exportBusy">{{ t("另存为…", "Save as…") }}</button>
+        <button class="btn-primary" type="button" :disabled="saveBusy" :aria-busy="saveBusy" @click="handleSave">
+          <span v-if="saveBusy" class="operation-spinner" aria-hidden="true"></span>
+          {{ saveBusy ? t("保存中…", "Saving…") : t("保存", "Save") }}
+        </button>
+        <Popconfirm
+          :title="t('重置草稿', 'Reset draft')"
+          :message="t('这会清除当前未保存的编辑内容并恢复默认信件。', 'This clears the current unsaved edits and restores the default letter.')"
+          :confirm-label="t('重置', 'Reset')"
+          danger
+          @confirm="resetDraft"
+        >
+          <template #trigger="{ toggle, triggerAttributes }">
+            <button
+              v-bind="triggerAttributes"
+              class="btn-secondary"
+              type="button"
+              @click="toggle($event)"
+            >{{ t("重置", "Reset") }}</button>
+          </template>
+        </Popconfirm>
+        <button class="btn-secondary" type="button" @click="saveClcAs" :disabled="exportBusy" :aria-busy="exportBusy">
+          <span v-if="exportBusy" class="operation-spinner" aria-hidden="true"></span>{{ t("另存为…", "Save as…") }}
+        </button>
         <div class="export-control">
-          <button class="btn-primary export-main" type="button" @click="exportClc" :disabled="exportBusy">
+          <button class="btn-primary export-main" type="button" @click="exportClc" :disabled="exportBusy" :aria-busy="exportBusy">
+            <span v-if="exportBusy" class="operation-spinner" aria-hidden="true"></span>
             {{ exportBusy ? t("正在导出…", "Exporting…") : t("导出为 CLC", "Export as CLC") }}
           </button>
           <button
@@ -1117,9 +1206,11 @@ onDeactivated(() => {
             :disabled="exportBusy"
             @click="exportMenuOpen = !exportMenuOpen"
           >{{ exportMenuOpen ? "▴" : "▾" }}</button>
-          <div v-if="exportMenuOpen" class="export-menu" role="menu">
-            <button type="button" role="menuitem" @click="exportHTML">{{ t("导出 HTML", "Export HTML") }}</button>
-          </div>
+          <Transition name="popover">
+            <div v-if="exportMenuOpen" class="export-menu" role="menu">
+              <button type="button" role="menuitem" @click="exportHTML">{{ t("导出 HTML", "Export HTML") }}</button>
+            </div>
+          </Transition>
         </div>
       </div>
       <p v-if="historyError" class="editor-error" role="alert">{{ historyError }}</p>
@@ -1130,24 +1221,33 @@ onDeactivated(() => {
       <div class="preview-heading">
         <h3>{{ t("预览", "Preview") }} <span>· {{ form.type === 'envelope' ? (!isOpened ? t('点击打开信封', 'Click to open the envelope') : !isExpanded ? t('再次点击抽出信纸', 'Click again to pull out the letter') : t('点击收起信纸', 'Click to put away the letter')) : form.type === 'postcard' ? t('点击明信片翻面', 'Click to flip the postcard') : t('单面信纸', 'Single-sided letter sheet') }}</span></h3>
         <span class="resize-label">{{ t("拖动调整大小", "Drag to resize") }}</span>
+        <button
+          class="preview-mobile-toggle"
+          type="button"
+          :aria-label="isMobilePreviewCollapsed ? t('展开预览', 'Expand preview') : t('收起预览', 'Collapse preview')"
+          :aria-expanded="!isMobilePreviewCollapsed"
+          aria-controls="mobile-preview-content"
+          @click="toggleMobilePreview"
+        >{{ isMobilePreviewCollapsed ? "＋" : "−" }}</button>
       </div>
-      <div
-        class="preview-resize-handle"
-        role="separator"
-        :aria-label="t('拖动调整预览窗口大小', 'Drag to resize the preview')"
-        aria-orientation="vertical"
-        :aria-valuenow="Math.round(previewWidth)"
-        aria-valuemin="34"
-        aria-valuemax="68"
-        tabindex="0"
-        @pointerdown="startPreviewResize"
-        @keydown="adjustPreviewWidth"
-      >
-        <span aria-hidden="true"></span>
-      </div>
+      <div id="mobile-preview-content" class="preview-content">
+        <div
+          class="preview-resize-handle"
+          role="separator"
+          :aria-label="t('拖动调整预览窗口大小', 'Drag to resize the preview')"
+          aria-orientation="vertical"
+          :aria-valuenow="Math.round(previewWidth)"
+          aria-valuemin="34"
+          aria-valuemax="68"
+          tabindex="0"
+          @pointerdown="startPreviewResize"
+          @keydown="adjustPreviewWidth"
+        >
+          <span aria-hidden="true"></span>
+        </div>
 
-      <!-- 信封模式 -->
-      <div v-if="form.type === 'envelope'" class="mail-stage" :class="{ opened: isOpened, expanded: isExpanded }" :style="{ '--font-scale': form.fontSize / 18 }" @click="handleStageClick">
+        <!-- 信封模式 -->
+        <div v-if="form.type === 'envelope'" class="mail-stage" :class="{ opened: isOpened, expanded: isExpanded }" :style="{ '--font-scale': form.fontSize / 18 }" @click="handleStageClick">
         <div class="letter-mask">
           <div class="letter-paper">
               <div class="paper-lines rich-text-body" :style="{ fontFamily: form.messageFont }" v-html="safeMessageHtml"></div>
@@ -1184,6 +1284,7 @@ onDeactivated(() => {
           v-for="sticker in form.stickers ?? []"
           :key="sticker.id"
           class="letter-sticker-item"
+          role="group"
           :class="{ selected: selectedStickerId === sticker.id }"
           :data-sticker-id="sticker.id"
           :style="{
@@ -1197,7 +1298,6 @@ onDeactivated(() => {
           :aria-label="t(`信纸贴纸，位置 ${Math.round(sticker.x)}%，大小 ${Math.round(sticker.width)}%，旋转 ${Math.round(sticker.rotation)} 度`, `Letter sticker, position ${Math.round(sticker.x)}%, size ${Math.round(sticker.width)}%, rotation ${Math.round(sticker.rotation)} degrees`)"
           @pointerdown="beginStickerInteraction('move', sticker, $event)"
           @click.stop="selectedStickerId = sticker.id"
-          @keydown.delete.prevent="removeSticker(sticker.id)"
           >
             <img :src="sticker.src" alt="" draggable="false" @load="updateStickerAspect(sticker, $event)" />
             <template v-if="selectedStickerId === sticker.id">
@@ -1215,21 +1315,32 @@ onDeactivated(() => {
               :title="t('拖动缩放', 'Drag to resize')"
               @pointerdown.stop="beginStickerInteraction('resize', sticker, $event)"
               ></button>
-              <button
-              class="sticker-control sticker-remove"
-              type="button"
-              :aria-label="t('移除贴纸', 'Remove sticker')"
-              :title="t('移除贴纸', 'Remove sticker')"
-              @pointerdown.stop
-              @click.stop="removeSticker(sticker.id)"
-              >×</button>
+              <Popconfirm
+                :title="t('移除贴纸', 'Remove sticker')"
+                :message="t('从这封信中移除这张贴纸？', 'Remove this sticker from the letter?')"
+                :confirm-label="t('移除', 'Remove')"
+                danger
+                @confirm="removeSticker(sticker.id)"
+              >
+                <template #trigger="{ toggle, triggerAttributes }">
+                  <button
+                    v-bind="triggerAttributes"
+                    class="sticker-control sticker-remove"
+                    type="button"
+                    :aria-label="t('移除贴纸', 'Remove sticker')"
+                    :title="t('移除贴纸', 'Remove sticker')"
+                    @pointerdown.stop
+                    @click.stop="toggle($event)"
+                  >×</button>
+                </template>
+              </Popconfirm>
             </template>
           </div>
         </article>
       </div>
 
-      <!-- 明信片模式 -->
-      <div v-else-if="form.type === 'postcard'" class="flip-scene" :style="{ '--font-scale': form.fontSize / 18 }" @click="handleStageClick">
+        <!-- 明信片模式 -->
+        <div v-else-if="form.type === 'postcard'" class="flip-scene" :style="{ '--font-scale': form.fontSize / 18 }" @click="handleStageClick">
         <div class="flip-card" :class="{ flipped: isFlipped }">
           <div class="flip-face flip-front">
             <div class="card-image-frame">
@@ -1265,11 +1376,11 @@ onDeactivated(() => {
         </div>
       </div>
 
-      <div class="toolbar-bottom">
-        <button v-if="form.type === 'envelope'" @click="isOpened ? resetMail() : handleStageClick()">{{ isOpened ? t("重新封装", "Close envelope") : t("打开信纸", "Open letter") }}</button>
-      </div>
+        <div class="toolbar-bottom">
+          <button v-if="form.type === 'envelope'" @click="isOpened ? resetMail() : handleStageClick()">{{ isOpened ? t("重新封装", "Close envelope") : t("打开信纸", "Open letter") }}</button>
+        </div>
 
-      <footer class="hint-bar">
+        <footer class="hint-bar">
         <span v-if="form.type === 'envelope'">
           <span v-if="!isOpened">{{ t("点击信封或按钮打开信封", "Click the envelope or button to open it") }}</span>
           <span v-else-if="!isExpanded">{{ t("信封已打开，再次点击抽出信纸", "Envelope opened. Click again to pull out the letter") }}</span>
@@ -1279,7 +1390,8 @@ onDeactivated(() => {
           <span v-if="!isFlipped">{{ t("点击明信片翻面查看文字", "Flip the postcard to read the message") }}</span>
           <span v-else>{{ t("点击明信片翻回图片", "Flip the postcard back to the image") }}</span>
         </span>
-      </footer>
+        </footer>
+      </div>
     </div>
   </div>
 </template>
@@ -1385,8 +1497,7 @@ onDeactivated(() => {
 }
 
 .field input,
-.field textarea,
-.field select {
+.field textarea {
   padding: 8px;
   border: 1px solid #d8d7d1;
   border-radius: 3px;
@@ -1398,8 +1509,7 @@ onDeactivated(() => {
 }
 
 .field input:focus,
-.field textarea:focus,
-.field select:focus {
+.field textarea:focus {
   outline: none;
   border-color: #92958d;
   box-shadow: 0 0 0 2px rgba(102, 106, 97, 0.1);
@@ -1653,7 +1763,7 @@ onDeactivated(() => {
   grid-template-columns: minmax(0, 1fr) minmax(330px, var(--preview-width, 46%));
   align-items: start;
   gap: 18px;
-  max-width: none;
+  max-width: calc(100vw - 24px);
   margin: 0;
   color: var(--text);
   container-type: inline-size;
@@ -1709,8 +1819,7 @@ onDeactivated(() => {
 }
 
 .field input,
-.field textarea,
-.field select {
+.field textarea {
   min-height: 36px;
   padding: 8px 10px;
   border-color: var(--border-strong);
@@ -1785,10 +1894,18 @@ onDeactivated(() => {
 }
 
 .field input:focus,
-.field textarea:focus,
-.field select:focus {
+.field textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+
+.field > :deep(.app-select),
+.field > :deep(.color-picker) {
+  width: 100%;
+}
+
+.field > :deep(.color-picker .color-trigger) {
+  width: 100%;
 }
 
 .preset-panel {
@@ -1942,12 +2059,21 @@ onDeactivated(() => {
 .preview-section {
   position: relative;
   position: sticky;
-  top: 18px;
+  top: calc(56px + env(safe-area-inset-top, 0px) + 18px);
   min-width: 0;
+  max-width: calc(100vw - 32px);
   margin: 0;
   padding: 18px;
   border: 1px solid var(--border);
   background: var(--surface);
+}
+
+.preview-mobile-toggle {
+  display: none;
+}
+
+.preview-content {
+  min-width: 0;
 }
 
 .preview-section.envelope-expanded-preview {
@@ -1998,7 +2124,7 @@ onDeactivated(() => {
 }
 
 .preview-resize-handle:focus-visible {
-  outline: 1px solid var(--accent);
+  outline: none;
 }
 
 .resizing-preview,
@@ -2216,17 +2342,180 @@ onDeactivated(() => {
   }
 }
 
+@media (max-width: 820px) {
+  .editor {
+    --mobile-titlebar-offset: 0px;
+    container-type: normal;
+  }
+
+  .editor.titlebar-always-bottom,
+  .editor.titlebar-narrow-bottom {
+    --mobile-titlebar-offset: 112px;
+  }
+
+  .editor-body,
+  .preview-section {
+    grid-column: 1 / -1;
+  }
+
+  .preview-resize-handle,
+  .resize-label {
+    display: none;
+  }
+
+  .preview-mobile-toggle {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 1.25em;
+    cursor: pointer;
+  }
+
+  .preview-mobile-toggle:hover {
+    border-color: var(--accent);
+    background: var(--surface-hover);
+  }
+
+  .preview-mobile-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .preview-heading h3 {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .editor.titlebar-always-bottom .preview-section,
+  .editor.titlebar-narrow-bottom .preview-section {
+    position: fixed;
+    z-index: 20;
+    right: 0;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    left: 0;
+    top: auto;
+    max-height: 36dvh;
+    overflow-y: auto;
+    padding: 10px 14px;
+    border-right: 0;
+    border-left: 0;
+    background: var(--surface);
+    box-shadow: 0 -8px 24px rgb(24 27 30 / 14%);
+  }
+
+  .editor.titlebar-always-bottom .preview-section.envelope-expanded-preview,
+  .editor.titlebar-narrow-bottom .preview-section.envelope-expanded-preview {
+    position: fixed;
+  }
+
+  .editor.titlebar-always-bottom .preview-section .preview-content,
+  .editor.titlebar-narrow-bottom .preview-section .preview-content {
+    margin-top: 8px;
+  }
+
+  .editor.titlebar-always-bottom .preview-section .preview-content,
+  .editor.titlebar-narrow-bottom .preview-section .preview-content {
+    margin-top: 8px;
+  }
+
+  .mobile-preview-collapsed .preview-section .preview-content {
+    display: none;
+  }
+
+  .editor.titlebar-always-bottom .preview-section .preview-heading,
+  .editor.titlebar-narrow-bottom .preview-section .preview-heading {
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .editor.titlebar-always-bottom .preview-section .preview-heading h3,
+  .editor.titlebar-narrow-bottom .preview-section .preview-heading h3 {
+    margin: 0;
+  }
+
+  .editor.titlebar-always-bottom .preview-section .preview-heading h3 span,
+  .editor.titlebar-narrow-bottom .preview-section .preview-heading h3 span {
+    display: none;
+  }
+
+  .preview-resize-handle {
+    display: none;
+  }
+
+  .editor.titlebar-always-bottom .actions,
+  .editor.titlebar-narrow-bottom .actions {
+    position: fixed;
+    z-index: 31;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(var(--mobile-titlebar-offset, 0px) + env(safe-area-inset-bottom, 0px));
+    left: max(16px, env(safe-area-inset-left, 0px));
+    min-height: 64px;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 0 18px rgb(24 27 30 / 12%);
+    scrollbar-width: none;
+  }
+
+  .editor.titlebar-always-bottom .actions::-webkit-scrollbar,
+  .editor.titlebar-narrow-bottom .actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .editor.titlebar-always-bottom .actions > *,
+  .editor.titlebar-narrow-bottom .actions > * {
+    flex: 0 0 auto;
+  }
+
+  .editor.titlebar-always-bottom .actions .export-menu,
+  .editor.titlebar-narrow-bottom .actions .export-menu {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(var(--mobile-titlebar-offset, 0px) + 70px + env(safe-area-inset-bottom, 0px));
+    z-index: 33;
+  }
+
+  .editor.titlebar-always-bottom .actions .btn-primary,
+  .editor.titlebar-always-bottom .actions .btn-secondary,
+  .editor.titlebar-narrow-bottom .actions .btn-primary,
+  .editor.titlebar-narrow-bottom .actions .btn-secondary {
+    min-height: 44px;
+    padding: 7px 10px;
+    white-space: nowrap;
+  }
+
+  .editor.titlebar-always-bottom .editor-body,
+  .editor.titlebar-narrow-bottom .editor-body {
+    padding-bottom: calc(36dvh + 96px + var(--mobile-titlebar-offset, 0px) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 @media (hover: none) and (pointer: coarse) {
   .field input,
   .field textarea,
-  .field select,
   .rich-editor {
     font-size: 16px;
     scroll-margin-block: 84px;
   }
 
   .field input,
-  .field select,
+  .field > :deep(.app-select) .app-select-trigger,
+  .field > :deep(.color-picker) .color-trigger,
   .btn-primary,
   .btn-secondary,
   .rich-toolbar button,

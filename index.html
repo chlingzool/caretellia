@@ -3,8 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f5f0e7" />
+    <meta name="theme-color" content="#f2f5f8" />
     <title>明信片生成器 · Caretellia</title>
+    <style>
+      :root {
+        color-scheme: light;
+        background: #f2f5f8;
+      }
+
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        background: #191c20;
+      }
+
+      html,
+      body,
+      #app {
+        min-height: 100%;
+        margin: 0;
+        background: #f2f5f8;
+      }
+
+      :root[data-theme="dark"] body,
+      :root[data-theme="dark"] #app {
+        background: #191c20;
+      }
+    </style>
   </head>
 
   <body>
@@ -12,5 +36,3 @@
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-<style>
-</style>

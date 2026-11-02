@@ -3,12 +3,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import postcardEditor from "./postcard-editor.vue";
 import TemplateGallery from "./TemplateGallery.vue";
 import SettingsPage from "./SettingsPage.vue";
 import ThanksMenu from "./ThanksMenu.vue";
+import Popconfirm from "./components/Popconfirm.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
+import ToastHost from "./components/ToastHost.vue";
 import EnvelopeViewer from "./EnvelopeViewer.vue";
+import { confirmationRequest, resolveConfirmation } from "./composables/confirmationDialog";
+import { showToast } from "./composables/toast";
 import { locale, setLocale, syncSystemLocale, t } from "./i18n";
 import { decodeClc, MAX_CLC_FILE_SIZE } from "./clc";
 import { deleteHistoryCard as removeHistoryCard, listHistory, saveHistoryCard } from "./letterHistory";
@@ -28,10 +33,10 @@ interface ClcOpenRequest {
 }
 
 const screens = ref<Screen[]>([{ kind: "home" }]);
+const mainContent = ref<HTMLElement | null>(null);
 const historyCards = ref<PostcardData[]>([]);
 const historyLoading = ref(false);
 const historyError = ref("");
-const historyStatus = ref("");
 const clcImportInput = ref<HTMLInputElement | null>(null);
 const historyDetailsId = ref<string | null>(null);
 const settingsError = ref("");
@@ -40,7 +45,9 @@ const showThanks = ref(false);
 const mobileMenuOpen = ref(false);
 const thanksButton = ref<HTMLButtonElement | null>(null);
 const mobileMenuButton = ref<HTMLButtonElement | null>(null);
-const mobileMenuRoot = ref<HTMLElement | null>(null);
+const mobileDrawer = ref<HTMLElement | null>(null);
+const mobileDrawerCloseButton = ref<HTMLButtonElement | null>(null);
+let previousBodyOverflow = "";
 let androidBackButtonListener: Awaited<ReturnType<typeof onBackButtonPress>> | null = null;
 let unlistenClcOpen: UnlistenFn | null = null;
 const handledClcOpenRequests = new Set<number>();
@@ -58,6 +65,18 @@ watch(theme, (nextTheme) => {
 }, { immediate: true });
 
 const currentScreen = computed(() => screens.value[screens.value.length - 1]);
+
+watch(currentScreen, async () => {
+  await nextTick();
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  mainContent.value?.animate(
+    [
+      { opacity: 0.72, transform: "translateY(8px)" },
+      { opacity: 1, transform: "translateY(0)" },
+    ],
+    { duration: 240, easing: "cubic-bezier(0.2, 0.75, 0.25, 1)" },
+  );
+}, { flush: "post" });
 
 async function refreshHistory() {
   historyLoading.value = true;
@@ -90,6 +109,9 @@ function readSettings(): AppSettings {
   const defaults: AppSettings = {
     uiFont: "'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif",
     uiFontSize: 14,
+    titleBarPosition: "top",
+    mobilePreviewDefault: "expanded",
+    acceptUnstableUpdates: false,
     exportDirectory: "",
     exportColorMode: "system",
     recentViewedLimit: 10,
@@ -102,6 +124,11 @@ function readSettings(): AppSettings {
     return {
       uiFont: typeof parsed.uiFont === "string" ? parsed.uiFont : defaults.uiFont,
       uiFontSize: Number.isFinite(parsed.uiFontSize) ? Math.min(20, Math.max(12, parsed.uiFontSize)) : defaults.uiFontSize,
+      titleBarPosition: parsed.titleBarPosition === "bottom" || parsed.titleBarPosition === "narrow-bottom"
+        ? parsed.titleBarPosition
+        : "top",
+      mobilePreviewDefault: parsed.mobilePreviewDefault === "collapsed" ? "collapsed" : "expanded",
+      acceptUnstableUpdates: parsed.acceptUnstableUpdates === true,
       exportDirectory: typeof parsed.exportDirectory === "string" ? parsed.exportDirectory : defaults.exportDirectory,
       exportColorMode: parsed.exportColorMode === "light" || parsed.exportColorMode === "dark"
         ? parsed.exportColorMode
@@ -190,6 +217,36 @@ function closeThanks() {
   });
 }
 
+function isTouchClick(event: MouseEvent) {
+  return "pointerType" in event && event.pointerType === "touch";
+}
+
+function toggleMobileDrawer(event: MouseEvent) {
+  if (mobileMenuOpen.value) {
+    closeMobileDrawer(!isTouchClick(event));
+    return;
+  }
+  mobileMenuOpen.value = true;
+  void nextTick(() => {
+    if (isTouchClick(event)) mobileDrawer.value?.focus();
+    else mobileDrawerCloseButton.value?.focus();
+  });
+}
+
+function closeMobileDrawer(restoreFocus = true) {
+  mobileMenuOpen.value = false;
+  if (restoreFocus) void nextTick(() => mobileMenuButton.value?.focus());
+}
+
+watch(mobileMenuOpen, (isOpen) => {
+  if (isOpen) {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  } else {
+    document.body.style.overflow = previousBodyOverflow;
+  }
+});
+
 function clearTouchButtonFocus(event: MouseEvent) {
   if (!("pointerType" in event) || event.pointerType !== "touch" || !(event.target instanceof Element)) return;
   const button = event.target.closest("button");
@@ -197,13 +254,29 @@ function clearTouchButtonFocus(event: MouseEvent) {
 }
 
 function handleMobileMenuKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") mobileMenuOpen.value = false;
+  if (!mobileMenuOpen.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMobileDrawer();
+  } else if (event.key === "Tab") {
+    const focusable = mobileDrawer.value?.querySelectorAll<HTMLElement>("button:not(:disabled), a[href]");
+    const first = focusable?.item(0);
+    const last = focusable?.item((focusable.length ?? 1) - 1);
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === mobileDrawer.value)) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === mobileDrawer.value)) {
+      event.preventDefault();
+      first?.focus();
+    } else if (document.activeElement !== first && document.activeElement !== last && !mobileDrawer.value?.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus();
+    }
+  }
 }
 
-function handleOutsideMenuClick(event: PointerEvent) {
-  if (event.target instanceof Node && !mobileMenuRoot.value?.contains(event.target)) {
-    mobileMenuOpen.value = false;
-  }
+function handleViewportResize() {
+  if (window.innerWidth > 820 && mobileMenuOpen.value) closeMobileDrawer(false);
 }
 
 function openTemplateEditor(template: LetterTemplate) {
@@ -224,16 +297,10 @@ function openHistoryCard(cardId: string) {
 
 async function deleteHistoryCard(cardId: string) {
   try {
-    const message = t("确定删除这封信件吗？此操作无法撤销。", "Delete this letter? This action cannot be undone.");
-    const confirmed = "__TAURI_INTERNALS__" in window
-      ? await confirmDialog(message, { title: t("删除信件", "Delete letter"), kind: "warning" })
-      : window.confirm(message);
-    if (!confirmed) return;
-
     await removeHistoryCard(cardId);
     historyError.value = "";
-    historyStatus.value = "";
     await refreshHistory();
+    showToast(t("信件已删除。", "Letter deleted."));
   } catch (error) {
     console.error("Unable to delete saved letter:", error);
     historyError.value = t("删除失败，请检查本机存储空间后重试。", "Could not delete the letter. Check local storage and try again.");
@@ -252,12 +319,11 @@ async function importClc(event: Event) {
     await saveHistoryCard(card);
     historyCards.value = await listHistory();
     historyError.value = "";
-    historyStatus.value = t(`已导入“${card.title || "未命名"}”。`, `Imported "${card.title || "Untitled"}".`);
+    showToast(t(`已导入“${card.title || "未命名"}”。`, `Imported "${card.title || "Untitled"}".`));
     window.dispatchEvent(new CustomEvent("caretellia-history-changed"));
   } catch (error) {
     console.error("Unable to import CLC letter:", error);
     const reason = error instanceof Error ? error.message : String(error);
-    historyStatus.value = "";
     historyError.value = t(`导入失败：${reason}`, `Import failed: ${reason}`);
   }
 }
@@ -285,6 +351,7 @@ async function chooseExportDirectory() {
     const selected = await open({ directory: true, multiple: false, title: t("选择导出文件夹", "Choose export folder") });
     if (typeof selected === "string") {
       updateSettings({ ...settings, exportDirectory: selected });
+      if (!settingsError.value) showToast(t("默认导出文件夹已更新。", "Default export folder updated."));
     }
   } catch (error) {
     console.error("Unable to select export directory:", error);
@@ -300,8 +367,12 @@ function handleExport(data: any) {
 const handleStorageUpdate = () => refreshHistory();
 
 function handleAndroidBackButton(canGoBack: boolean) {
-  if (mobileMenuOpen.value) {
+  if (confirmationRequest.value) {
+    resolveConfirmation(false);
+  } else if (mobileMenuOpen.value) {
     mobileMenuOpen.value = false;
+  } else if (document.querySelector(".app-select-options, .color-popover, .popconfirm-panel")) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   } else if (showThanks.value) {
     closeThanks();
   } else if (showExport.value) {
@@ -326,8 +397,8 @@ onMounted(() => {
       .catch((error) => console.error("Unable to register Android back-button handling:", error));
   }
   document.addEventListener("keydown", handleMobileMenuKeydown);
-  document.addEventListener("pointerdown", handleOutsideMenuClick);
   window.addEventListener("languagechange", syncSystemLocale);
+  window.addEventListener("resize", handleViewportResize);
   window.addEventListener("storage", handleStorageUpdate);
   window.addEventListener("caretellia-history-changed", handleStorageUpdate);
 });
@@ -339,16 +410,23 @@ onBeforeUnmount(() => {
       .catch((error) => console.error("Unable to unregister Android back-button handling:", error));
   }
   document.removeEventListener("keydown", handleMobileMenuKeydown);
-  document.removeEventListener("pointerdown", handleOutsideMenuClick);
   window.removeEventListener("languagechange", syncSystemLocale);
+  window.removeEventListener("resize", handleViewportResize);
   window.removeEventListener("storage", handleStorageUpdate);
   window.removeEventListener("caretellia-history-changed", handleStorageUpdate);
+  document.body.style.overflow = previousBodyOverflow;
 });
 </script>
 
 <template>
-  <div class="app-shell" :data-theme="theme" :style="{ '--ui-font-family': settings.uiFont, '--ui-font-size': `${settings.uiFontSize}px` }" @click="clearTouchButtonFocus">
-    <header ref="mobileMenuRoot" class="app-bar">
+  <div
+    class="app-shell"
+    :data-theme="theme"
+    :data-titlebar-position="settings.titleBarPosition"
+    :style="{ '--ui-font-family': settings.uiFont, '--ui-font-size': `${settings.uiFontSize}px` }"
+    @click="clearTouchButtonFocus"
+  >
+    <header class="app-bar">
       <button class="brand" type="button" :aria-label="t('回到首页', 'Go to home')" @click="goHome">
         <span class="brand-mark" aria-hidden="true">✉</span>
         <span class="brand-name">Caretellia</span>
@@ -375,26 +453,47 @@ onBeforeUnmount(() => {
           class="mobile-menu-toggle"
           type="button"
           :aria-label="mobileMenuOpen ? t('关闭菜单', 'Close menu') : t('打开菜单', 'Open menu')"
-          aria-controls="mobile-app-menu"
+          aria-controls="mobile-app-drawer"
           :aria-expanded="mobileMenuOpen"
-          @click="mobileMenuOpen = !mobileMenuOpen"
+          @click="toggleMobileDrawer"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path v-if="!mobileMenuOpen" d="M4 6h16M4 12h16M4 18h16" /><path v-else d="m6 6 12 12M18 6 6 18" /></svg>
         </button>
-        <nav v-if="mobileMenuOpen" id="mobile-app-menu" class="mobile-app-menu" :aria-label="t('应用菜单', 'App menu')">
-          <button class="mobile-menu-thanks" type="button" @click="openThanks">
-            <span aria-hidden="true">♥</span>{{ t("感谢", "Thanks") }}
-          </button>
-          <button type="button" @click="openSettings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>
-            {{ t("设置", "Settings") }}
-          </button>
-        </nav>
       </div>
       </div>
     </header>
-
-    <main class="container">
+    <Transition name="mobile-drawer">
+      <div v-if="mobileMenuOpen" class="mobile-drawer-backdrop" @click.self="closeMobileDrawer(!isTouchClick($event))">
+        <aside
+          id="mobile-app-drawer"
+          ref="mobileDrawer"
+          class="mobile-drawer"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+          :aria-label="t('应用菜单', 'App menu')"
+        >
+          <header class="mobile-drawer-header">
+            <strong>{{ t("应用菜单", "App menu") }}</strong>
+            <button ref="mobileDrawerCloseButton" class="mobile-drawer-close" type="button" :aria-label="t('关闭菜单', 'Close menu')" @click="closeMobileDrawer(!isTouchClick($event))">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+            </button>
+          </header>
+          <nav class="mobile-drawer-nav">
+            <button class="mobile-menu-thanks" type="button" @click="openThanks">
+              <span aria-hidden="true">♥</span>{{ t("感谢", "Thanks") }}
+            </button>
+            <button type="button" @click="openSettings">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>
+              {{ t("设置", "Settings") }}
+            </button>
+          </nav>
+        </aside>
+      </div>
+    </Transition>
+    <ConfirmDialog />
+    <ToastHost />
+    <main ref="mainContent" class="container">
       <template v-if="currentScreen.kind === 'home'">
         <section class="welcome">
           <div>
@@ -465,6 +564,7 @@ onBeforeUnmount(() => {
         v-else-if="currentScreen.kind === 'viewer'"
         :key="currentScreen.openRequestId ?? 'history-viewer'"
         :recent-view-limit="settings.recentViewedLimit"
+        :title-bar-position="settings.titleBarPosition"
         :initial-file-path="currentScreen.initialFilePath"
         @back="goBack"
       />
@@ -492,7 +592,6 @@ onBeforeUnmount(() => {
         </section>
 
         <p v-if="historyError" class="history-error" role="alert">{{ historyError }}</p>
-        <p v-if="historyStatus" class="history-success" role="status">{{ historyStatus }}</p>
         <section class="panel-shell">
           <div v-if="historyLoading && historyCards.length === 0" class="empty-state" role="status">
             <strong>{{ t("正在读取历史信件…", "Loading letter history…") }}</strong>
@@ -504,38 +603,55 @@ onBeforeUnmount(() => {
             <button class="toolbar-btn primary-command" type="button" @click="openNewEditor">{{ t("新建信件", "New letter") }}</button>
           </div>
 
-          <article v-for="card in historyCards" :key="card.id" class="history-entry">
-          <div
-            class="history-item"
-            role="button"
-            tabindex="0"
-            :aria-expanded="historyDetailsId === card.id"
-            @click="toggleHistoryDetails(card.id)"
-            @keydown.enter.prevent="toggleHistoryDetails(card.id)"
-            @keydown.space.prevent="toggleHistoryDetails(card.id)"
-          >
-            <span class="history-type-icon" aria-hidden="true">{{ card.type === 'envelope' ? '✉' : card.type === 'letter' ? '▤' : '▧' }}</span>
-            <span class="history-info history-open-button">
-              <span class="history-title">{{ card.title || t('未命名', 'Untitled') }}<span class="type-tag">{{ card.type === 'envelope' ? t('信封', 'Envelope') : card.type === 'letter' ? t('信纸', 'Letter sheet') : t('明信片', 'Postcard') }}</span></span>
-              <span class="history-address">{{ t("来自：", "From: ") }}{{ addressName(card.from, t("我", "Me")) }} <span aria-hidden="true">→</span> {{ t("致：", "To: ") }}{{ addressName(card.to, t("你", "You")) }}</span>
-              <span v-if="card.note" class="history-note">{{ card.note }}</span>
-              <span class="history-date">{{ new Date(card.createdAt || Date.now()).toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN') }}</span>
-            </span>
-            <div class="history-actions">
-              <button class="delete-button" type="button" :aria-label="t(`删除${card.title || '未命名信件'}`, `Delete ${card.title || 'untitled letter'}`)" @click.stop="deleteHistoryCard(card.id)">{{ t("删除", "Delete") }}</button>
-              <button class="history-open" type="button" @click.stop="openHistoryCard(card.id)">{{ t("打开", "Open") }} <span aria-hidden="true">→</span></button>
-            </div>
-          </div>
-          <div v-if="historyDetailsId === card.id" class="history-details" @click.stop>
-            <p><strong>{{ t("标题：", "Title: ") }}</strong>{{ card.title || t("未命名", "Untitled") }}</p>
-            <p><strong>{{ t("类型：", "Type: ") }}</strong>{{ card.type === 'envelope' ? t('信封', 'Envelope') : card.type === 'letter' ? t('信纸', 'Letter sheet') : t('明信片', 'Postcard') }}</p>
-            <p><strong>{{ t("寄件人：", "From: ") }}</strong>{{ addressName(card.from, t("我", "Me")) }}　<strong>{{ t("收件人：", "To: ") }}</strong>{{ addressName(card.to, t("你", "You")) }}</p>
-            <p v-if="card.note"><strong>{{ t("备注：", "Note: ") }}</strong>{{ card.note }}</p>
-            <p v-if="card.message"><strong>{{ t("正文：", "Message: ") }}</strong><span class="detail-copy">{{ card.message }}</span></p>
-            <p v-if="card.type === 'postcard' && card.backCaption"><strong>{{ t("背面文字：", "Back text: ") }}</strong><span class="detail-copy">{{ card.backCaption }}</span></p>
-            <p v-if="card.type === 'postcard' && card.caption"><strong>{{ t("正面文字：", "Front text: ") }}</strong>{{ card.caption }}</p>
-          </div>
-          </article>
+          <TransitionGroup name="history-list" tag="div" class="history-list">
+            <article v-for="card in historyCards" :key="card.id" class="history-entry">
+              <div
+                class="history-item"
+              >
+                <span class="history-type-icon" aria-hidden="true">{{ card.type === 'envelope' ? '✉' : card.type === 'letter' ? '▤' : '▧' }}</span>
+                <button
+                  class="history-info history-open-button"
+                  type="button"
+                  :aria-expanded="historyDetailsId === card.id"
+                  @click="toggleHistoryDetails(card.id)"
+                >
+                  <span class="history-title">{{ card.title || t('未命名', 'Untitled') }}<span class="type-tag">{{ card.type === 'envelope' ? t('信封', 'Envelope') : card.type === 'letter' ? t('信纸', 'Letter sheet') : t('明信片', 'Postcard') }}</span></span>
+                  <span class="history-address">{{ t("来自：", "From: ") }}{{ addressName(card.from, t("我", "Me")) }} <span aria-hidden="true">→</span> {{ t("致：", "To: ") }}{{ addressName(card.to, t("你", "You")) }}</span>
+                  <span v-if="card.note" class="history-note">{{ card.note }}</span>
+                  <span class="history-date">{{ new Date(card.createdAt || Date.now()).toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN') }}</span>
+                </button>
+                <div class="history-actions">
+                  <Popconfirm
+                    :title="t('删除信件', 'Delete letter')"
+                    :message="t(`确定删除“${card.title || '未命名信件'}”吗？此操作无法撤销。`, `Delete “${card.title || 'untitled letter'}”? This action cannot be undone.`)"
+                    :confirm-label="t('删除', 'Delete')"
+                    danger
+                    @confirm="deleteHistoryCard(card.id)"
+                  >
+                    <template #trigger="{ toggle, triggerAttributes }">
+                      <button
+                        v-bind="triggerAttributes"
+                        class="delete-button"
+                        type="button"
+                        :aria-label="t(`删除${card.title || '未命名信件'}`, `Delete ${card.title || 'untitled letter'}`)"
+                        @click.stop="toggle($event)"
+                      >{{ t("删除", "Delete") }}</button>
+                    </template>
+                  </Popconfirm>
+                  <button class="history-open" type="button" @click.stop="openHistoryCard(card.id)">{{ t("打开", "Open") }} <span aria-hidden="true">→</span></button>
+                </div>
+              </div>
+              <div v-if="historyDetailsId === card.id" class="history-details" @click.stop>
+                <p><strong>{{ t("标题：", "Title: ") }}</strong>{{ card.title || t("未命名", "Untitled") }}</p>
+                <p><strong>{{ t("类型：", "Type: ") }}</strong>{{ card.type === 'envelope' ? t('信封', 'Envelope') : card.type === 'letter' ? t('信纸', 'Letter sheet') : t('明信片', 'Postcard') }}</p>
+                <p><strong>{{ t("寄件人：", "From: ") }}</strong>{{ addressName(card.from, t("我", "Me")) }}　<strong>{{ t("收件人：", "To: ") }}</strong>{{ addressName(card.to, t("你", "You")) }}</p>
+                <p v-if="card.note"><strong>{{ t("备注：", "Note: ") }}</strong>{{ card.note }}</p>
+                <p v-if="card.message"><strong>{{ t("正文：", "Message: ") }}</strong><span class="detail-copy">{{ card.message }}</span></p>
+                <p v-if="card.type === 'postcard' && card.backCaption"><strong>{{ t("背面文字：", "Back text: ") }}</strong><span class="detail-copy">{{ card.backCaption }}</span></p>
+                <p v-if="card.type === 'postcard' && card.caption"><strong>{{ t("正面文字：", "Front text: ") }}</strong>{{ card.caption }}</p>
+              </div>
+            </article>
+          </TransitionGroup>
         </section>
       </template>
 
@@ -586,11 +702,15 @@ onBeforeUnmount(() => {
           :editor-session-id="currentScreen.sessionId"
           :export-directory="settings.exportDirectory"
           :export-color-mode="settings.exportColorMode"
+          :title-bar-position="settings.titleBarPosition"
+          :mobile-preview-default="settings.mobilePreviewDefault"
           @export="handleExport"
         />
       </KeepAlive>
     </main>
-    <ThanksMenu v-if="showThanks" @close="closeThanks" />
+    <Transition name="modal">
+      <ThanksMenu v-if="showThanks" @close="closeThanks" />
+    </Transition>
   </div>
 </template>
 
@@ -637,6 +757,9 @@ onBeforeUnmount(() => {
 }
 
 .app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 18;
   height: 56px;
   padding: 0 max(24px, calc((100vw - 1240px) / 2));
   display: flex;
@@ -644,6 +767,15 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+
+.app-shell[data-titlebar-position="bottom"] .app-bar {
+  position: fixed;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
 }
 
 .app-actions {
@@ -777,6 +909,10 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
+.app-shell[data-titlebar-position="bottom"] .container {
+  padding-bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+}
+
 .welcome,
 .page-heading {
   display: flex;
@@ -854,12 +990,31 @@ onBeforeUnmount(() => {
 }
 
 .command-bar {
+  position: sticky;
+  z-index: 20;
+  top: calc(56px + env(safe-area-inset-top, 0px));
   display: flex;
   align-items: center;
   gap: 12px;
   min-height: 48px;
   margin-bottom: 28px;
   border-bottom: 1px solid var(--border);
+  background: var(--app-bg);
+}
+
+.app-shell[data-titlebar-position="bottom"] .command-bar {
+  position: fixed;
+  z-index: 32;
+  right: max(24px, calc((100vw - 1240px) / 2 + 24px));
+  bottom: 0;
+  left: max(24px, calc((100vw - 1240px) / 2 + 24px));
+  top: auto;
+  min-height: 56px;
+  margin: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  background: var(--surface);
 }
 
 .command-context {
@@ -894,8 +1049,7 @@ onBeforeUnmount(() => {
 .secondary-button:focus-visible,
 .theme-toggle:focus-visible,
 .thanks-toggle:focus-visible,
-.home-card:focus-visible,
-.history-item:focus-visible {
+.home-card:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -1034,6 +1188,21 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border);
 }
 
+.app-shell[data-titlebar-position="bottom"] .app-bar {
+  position: fixed;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  background: var(--surface);
+}
+
+.app-shell[data-titlebar-position="bottom"] .command-bar {
+  bottom: 56px;
+}
+
 .panel-header h2 {
   margin: 0;
   font-size: 1em;
@@ -1072,7 +1241,6 @@ onBeforeUnmount(() => {
 }
 
 .history-item {
-  cursor: pointer;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto;
   justify-content: space-between;
@@ -1083,6 +1251,28 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--text);
+}
+
+.history-list {
+  position: relative;
+}
+
+.history-list-enter-active,
+.history-list-leave-active,
+.history-list-move {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.history-list-enter-from,
+.history-list-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.history-list-leave-active {
+  position: absolute;
+  right: 0;
+  left: 0;
 }
 
 .history-item:last-child {
@@ -1097,7 +1287,7 @@ onBeforeUnmount(() => {
   background: var(--surface-alt);
 }
 
-.history-item:focus-visible {
+.history-open-button:focus-visible {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--accent);
@@ -1116,6 +1306,11 @@ onBeforeUnmount(() => {
   color: inherit;
   text-align: left;
   font: inherit;
+  cursor: pointer;
+}
+
+.history-open-button:hover {
+  background: var(--surface-alt);
 }
 
 .history-open:focus-visible,
@@ -1269,12 +1464,25 @@ onBeforeUnmount(() => {
 
 @media (max-width: 820px) {
   .app-bar {
-    position: sticky;
-    top: 0;
     z-index: 20;
     height: auto;
     min-height: calc(56px + env(safe-area-inset-top, 0px));
     padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 6px max(16px, env(safe-area-inset-left, 0px));
+  }
+
+  .app-shell[data-titlebar-position="bottom"] .app-bar,
+  .app-shell[data-titlebar-position="narrow-bottom"] .app-bar {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    min-height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding: 6px max(16px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(16px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+    background: var(--surface);
   }
 
   .brand-product,
@@ -1327,7 +1535,7 @@ onBeforeUnmount(() => {
   }
 
   .mobile-menu-toggle:focus-visible,
-  .mobile-app-menu button:focus-visible {
+  .mobile-drawer button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
@@ -1341,26 +1549,73 @@ onBeforeUnmount(() => {
     stroke-linecap: round;
   }
 
-  .mobile-app-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    z-index: 30;
-    display: grid;
-    gap: 4px;
-    width: min(220px, calc(100vw - 32px));
-    padding: 7px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    box-shadow: 0 12px 28px rgb(0 0 0 / 18%);
+  .mobile-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    justify-content: flex-end;
+    background: rgb(8 14 20 / 56%);
+    overscroll-behavior: contain;
   }
 
-  .mobile-app-menu button {
+  .mobile-drawer {
+    display: flex;
+    flex-direction: column;
+    width: min(340px, 86vw);
+    height: 100%;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: -16px 0 36px rgb(0 0 0 / 20%);
+  }
+
+  .mobile-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 64px;
+    padding: 8px 18px;
+    border-bottom: 1px solid var(--border);
+    font-size: 1.1em;
+  }
+
+  .mobile-drawer-close {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .mobile-drawer-close svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+  }
+
+  .mobile-drawer-nav {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 14px;
+  }
+
+  .mobile-drawer-nav button {
     display: flex;
     align-items: center;
     gap: 10px;
     min-height: 44px;
-    padding: 8px 10px;
+    padding: 10px 12px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--text);
@@ -1369,12 +1624,12 @@ onBeforeUnmount(() => {
     cursor: pointer;
   }
 
-  .mobile-app-menu button:hover {
+  .mobile-drawer-nav button:hover {
     border-color: var(--border);
     background: var(--surface-hover);
   }
 
-  .mobile-app-menu button svg {
+  .mobile-drawer-nav button svg {
     width: 18px;
     height: 18px;
     flex: 0 0 auto;
@@ -1385,12 +1640,32 @@ onBeforeUnmount(() => {
     stroke-linejoin: round;
   }
 
-  .mobile-app-menu .mobile-menu-thanks {
+  .mobile-drawer-nav .mobile-menu-thanks {
     color: #98464b;
   }
 
-  .app-shell[data-theme="dark"] .mobile-app-menu .mobile-menu-thanks {
+  .app-shell[data-theme="dark"] .mobile-drawer-nav .mobile-menu-thanks {
     color: #edb2b3;
+  }
+
+  .mobile-drawer-enter-active,
+  .mobile-drawer-leave-active {
+    transition: background-color 0.2s ease;
+  }
+
+  .mobile-drawer-enter-active .mobile-drawer,
+  .mobile-drawer-leave-active .mobile-drawer {
+    transition: transform 0.2s ease;
+  }
+
+  .mobile-drawer-enter-from,
+  .mobile-drawer-leave-to {
+    background-color: transparent;
+  }
+
+  .mobile-drawer-enter-from .mobile-drawer,
+  .mobile-drawer-leave-to .mobile-drawer {
+    transform: translateX(100%);
   }
 
   .thanks-toggle {
@@ -1400,6 +1675,50 @@ onBeforeUnmount(() => {
 
   .container {
     padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(44px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  }
+
+  .app-shell[data-titlebar-position="bottom"] .container,
+  .app-shell[data-titlebar-position="narrow-bottom"] .container {
+    padding-bottom: calc(176px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell[data-titlebar-position="bottom"] .command-bar,
+  .app-shell[data-titlebar-position="narrow-bottom"] .command-bar {
+    top: auto;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    right: max(16px, env(safe-area-inset-right, 0px));
+    left: max(16px, env(safe-area-inset-left, 0px));
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+    background: var(--surface);
+  }
+
+  .app-shell[data-titlebar-position="bottom"] .command-bar::-webkit-scrollbar,
+  .app-shell[data-titlebar-position="narrow-bottom"] .command-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-shell[data-titlebar-position="bottom"] .command-bar .toolbar-btn,
+  .app-shell[data-titlebar-position="narrow-bottom"] .command-bar .toolbar-btn,
+  .app-shell[data-titlebar-position="bottom"] .command-context,
+  .app-shell[data-titlebar-position="narrow-bottom"] .command-context,
+  .app-shell[data-titlebar-position="bottom"] .toolbar-segment,
+  .app-shell[data-titlebar-position="narrow-bottom"] .toolbar-segment {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .app-shell[data-titlebar-position="narrow-bottom"] .command-bar {
+    position: fixed;
+    z-index: 32;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    min-height: 56px;
+    top: auto;
+    margin: 0;
+    padding: 6px 0;
   }
 
   .welcome {
@@ -1483,6 +1802,12 @@ onBeforeUnmount(() => {
     min-height: 44px;
     padding-right: 12px;
     padding-left: 12px;
+  }
+}
+
+@media (min-width: 821px) {
+  .mobile-drawer-backdrop {
+    display: none;
   }
 }
 </style>
