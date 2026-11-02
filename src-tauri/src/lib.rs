@@ -241,6 +241,7 @@ pub fn run() {
             read_clc_file,
             local_clc_file_exists,
             commands::fonts::get_system_fonts,
+            commands::updates::check_unstable_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

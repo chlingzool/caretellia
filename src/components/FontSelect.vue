@@ -1,19 +1,28 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import AppSelect from "./AppSelect.vue";
 import { t } from "../i18n";
 
-defineProps<{
+const props = defineProps<{
   modelValue: string;
   fonts: string[];
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (event: "update:modelValue", font: string): void;
 }>();
+
+const options = computed(() => [
+  { value: "system-ui", label: t("系统默认", "System default") },
+  ...props.fonts.map((font) => ({ value: font, label: font })),
+]);
 </script>
 
 <template>
-  <select :value="modelValue" @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)">
-    <option value="system-ui">{{ t("系统默认", "System default") }}</option>
-    <option v-for="font in fonts" :key="font" :value="font">{{ font }}</option>
-  </select>
+  <AppSelect
+    :model-value="modelValue"
+    :options="options"
+    :aria-label="t('字体', 'Font')"
+    @change="emit('update:modelValue', $event)"
+  />
 </template>

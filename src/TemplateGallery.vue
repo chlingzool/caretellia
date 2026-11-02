@@ -47,7 +47,7 @@ function categoryLabel(category: (typeof categories)[number]) {
       >{{ categoryLabel(category) }}</button>
     </nav>
 
-    <div class="template-grid">
+    <TransitionGroup name="template-list" tag="div" class="template-grid">
       <button
         v-for="template in visibleTemplates"
         :key="template.id"
@@ -70,7 +70,7 @@ function categoryLabel(category: (typeof categories)[number]) {
         </span>
         <span class="template-use">{{ t("用这份初稿", "Start with this draft") }} <span aria-hidden="true">→</span></span>
       </button>
-    </div>
+    </TransitionGroup>
   </section>
 </template>
 
@@ -140,6 +140,7 @@ h1 {
 }
 
 .template-grid {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(245px, 1fr));
   gap: 18px;
@@ -156,7 +157,7 @@ h1 {
   text-align: left;
   font: inherit;
   cursor: pointer;
-  transition: border-color 0.12s ease, background-color 0.12s ease;
+  transition: border-color 0.12s ease, background-color 0.12s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 
 .template-card:hover,
@@ -164,6 +165,24 @@ h1 {
   border-color: var(--accent);
   background: var(--surface-hover);
   outline: none;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 8%);
+}
+
+.template-list-enter-active,
+.template-list-leave-active,
+.template-list-move {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.template-list-enter-from,
+.template-list-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.template-list-leave-active {
+  position: absolute;
 }
 
 .template-art {

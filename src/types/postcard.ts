@@ -50,6 +50,9 @@ export interface LetterTemplate {
 export interface AppSettings {
   uiFont: string;
   uiFontSize: number;
+  titleBarPosition: "top" | "bottom" | "narrow-bottom";
+  mobilePreviewDefault: "expanded" | "collapsed";
+  acceptUnstableUpdates: boolean;
   exportDirectory: string;
   exportColorMode: "light" | "dark" | "system";
   recentViewedLimit: number;

@@ -2,30 +2,72 @@ name: publish
 
 on:
   workflow_dispatch:
+    inputs:
+      release_channel:
+        description: Release channel to build
+        required: true
+        type: choice
+        options:
+          - stable
+          - unstable
+        default: stable
   push:
     branches:
       - release
 
 jobs:
+  validate-channel:
+    name: Validate release channel
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      release_channel: ${{ steps.channel.outputs.release_channel }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+      - name: validate selected channel
+        id: channel
+        env:
+          RELEASE_CHANNEL: ${{ inputs.release_channel || 'stable' }}
+        run: |
+          version="$(node -p 'require("./src-tauri/tauri.conf.json").version')"
+          if [ "$RELEASE_CHANNEL" = "unstable" ] && [[ "$version" != *-* ]]; then
+            echo "Unstable releases require a SemVer pre-release version (for example 1.2.3-beta.1)." >&2
+            exit 1
+          fi
+          echo "release_channel=$RELEASE_CHANNEL" >> "$GITHUB_OUTPUT"
+
   windows-build:
     name: Build Windows
+    needs: validate-channel
     permissions:
       contents: write
     uses: ./.github/workflows/windows-build.yml
+    with:
+      release_channel: ${{ needs.validate-channel.outputs.release_channel }}
     secrets: inherit
 
   linux-build:
     name: Build Linux
+    needs: validate-channel
     permissions:
       contents: write
     uses: ./.github/workflows/linux-build.yml
+    with:
+      release_channel: ${{ needs.validate-channel.outputs.release_channel }}
     secrets: inherit
 
   macos-ios-build:
     name: Build macOS and iOS
+    needs: validate-channel
     permissions:
       contents: write
     uses: ./.github/workflows/macos-ios-build.yml
+    with:
+      release_channel: ${{ needs.validate-channel.outputs.release_channel }}
     secrets: inherit
 
   android-build:
@@ -37,6 +79,7 @@ jobs:
   publish-mobile:
     name: Attach mobile artifacts to release
     needs:
+      - validate-channel
       - windows-build
       - linux-build
       - macos-ios-build
@@ -60,3 +103,20 @@ jobs:
         run: |
           tag_name="app-v$(node -p 'require("./src-tauri/tauri.conf.json").version')"
           gh release upload "$tag_name" mobile-artifacts/* --clobber
+
+      - name: publish unstable updater manifest
+        if: needs.validate-channel.outputs.release_channel == 'unstable'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag_name="app-v$(node -p 'require("./src-tauri/tauri.conf.json").version')"
+          mkdir -p unstable-manifest
+          gh release download "$tag_name" --pattern latest.json --dir unstable-manifest
+          if ! gh release view unstable >/dev/null 2>&1; then
+            gh release create unstable \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --title "Unstable update channel" \
+              --notes "Manifest alias for the latest signed pre-release update."
+          fi
+          gh release upload unstable unstable-manifest/latest.json --clobber
