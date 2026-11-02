@@ -729,6 +729,8 @@ onBeforeUnmount(() => {
   --accent-hover: #0067b8;
   --accent-tint: #eaf4fc;
   --success: #107c41;
+  --bottom-bar-height: 56px;
+  --bottom-bar-stack-offset: calc(var(--bottom-bar-height) * 2 + 40px);
   min-height: 100vh;
   min-height: 100dvh;
   color: var(--text);
@@ -760,7 +762,7 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 18;
-  height: 56px;
+  height: var(--bottom-bar-height);
   padding: 0 max(24px, calc((100vw - 1240px) / 2));
   display: flex;
   align-items: center;
@@ -910,7 +912,7 @@ onBeforeUnmount(() => {
 }
 
 .app-shell[data-titlebar-position="bottom"] .container {
-  padding-bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(var(--bottom-bar-stack-offset) + env(safe-area-inset-bottom, 0px));
 }
 
 .welcome,
@@ -1006,10 +1008,10 @@ onBeforeUnmount(() => {
   position: fixed;
   z-index: 32;
   right: max(24px, calc((100vw - 1240px) / 2 + 24px));
-  bottom: 0;
+  bottom: var(--bottom-bar-height);
   left: max(24px, calc((100vw - 1240px) / 2 + 24px));
   top: auto;
-  min-height: 56px;
+  min-height: var(--bottom-bar-height);
   margin: 0;
   padding: 6px 0;
   border-top: 1px solid var(--border);
@@ -1200,7 +1202,7 @@ onBeforeUnmount(() => {
 }
 
 .app-shell[data-titlebar-position="bottom"] .command-bar {
-  bottom: 56px;
+  bottom: var(--bottom-bar-height);
 }
 
 .panel-header h2 {
@@ -1679,13 +1681,13 @@ onBeforeUnmount(() => {
 
   .app-shell[data-titlebar-position="bottom"] .container,
   .app-shell[data-titlebar-position="narrow-bottom"] .container {
-    padding-bottom: calc(176px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--bottom-bar-stack-offset) + env(safe-area-inset-bottom, 0px));
   }
 
   .app-shell[data-titlebar-position="bottom"] .command-bar,
   .app-shell[data-titlebar-position="narrow-bottom"] .command-bar {
     top: auto;
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--bottom-bar-height) + env(safe-area-inset-bottom, 0px));
     right: max(16px, env(safe-area-inset-right, 0px));
     left: max(16px, env(safe-area-inset-left, 0px));
     overflow-x: auto;
@@ -1714,8 +1716,8 @@ onBeforeUnmount(() => {
   .app-shell[data-titlebar-position="narrow-bottom"] .command-bar {
     position: fixed;
     z-index: 32;
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-    min-height: 56px;
+    bottom: calc(var(--bottom-bar-height) + env(safe-area-inset-bottom, 0px));
+    min-height: var(--bottom-bar-height);
     top: auto;
     margin: 0;
     padding: 6px 0;
