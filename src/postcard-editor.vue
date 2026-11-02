@@ -74,6 +74,7 @@ const backCaptionEditor = ref<HTMLElement | null>(null);
 const activeRichEditor = ref<HTMLElement | null>(null);
 const activeRichFormats = ref({ bold: false, italic: false, underline: false, unorderedList: false, orderedList: false });
 const letterCanvas = ref<HTMLElement | null>(null);
+const showJumpToBottomButton = ref(false);
 const historyError = ref("");
 const exportError = ref("");
 const exportMenuOpen = ref(false);
@@ -504,6 +505,16 @@ function toggleMobilePreview() {
   isMobilePreviewCollapsed.value = !isMobilePreviewCollapsed.value;
 }
 
+function updateJumpToBottomButton() {
+  const maxScrollTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  showJumpToBottomButton.value = window.scrollY < maxScrollTop - 120;
+}
+
+function jumpToEditorBottom() {
+  const maxScrollTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  window.scrollTo({ top: maxScrollTop + 24, behavior: "smooth" });
+}
+
 async function handleSave() {
   if (saveBusy.value) return;
   saveBusy.value = true;
@@ -924,6 +935,8 @@ function activateEditorEntry() {
 watch(() => props.editorSessionId, activateEditorEntry);
 
 onMounted(() => {
+  updateJumpToBottomButton();
+  window.addEventListener("scroll", updateJumpToBottomButton, { passive: true });
   void loadHistory().then(() => {
     activateEditorEntry();
     return nextTick(syncRichEditors);
@@ -935,6 +948,7 @@ onBeforeUnmount(() => {
   stopPreviewResize();
   endStickerInteraction();
   window.clearTimeout(envelopeTransitionTimer);
+  window.removeEventListener("scroll", updateJumpToBottomButton);
   document.removeEventListener("selectionchange", refreshRichFormatting);
 });
 onDeactivated(() => {
@@ -1217,6 +1231,17 @@ onDeactivated(() => {
       <p v-if="exportError" class="editor-error" role="alert">{{ exportError }}</p>
     </div>
 
+    <button
+      class="jump-to-bottom-btn"
+      :class="{ visible: showJumpToBottomButton }"
+      type="button"
+      :aria-label="t('跳到最下', 'Jump to bottom')"
+      title="↓"
+      @click="jumpToEditorBottom"
+    >
+      <span aria-hidden="true">↓</span>
+    </button>
+
     <div class="preview-section" :class="{ 'envelope-expanded-preview': form.type === 'envelope' && isExpanded }">
       <div class="preview-heading">
         <h3>{{ t("预览", "Preview") }} <span>· {{ form.type === 'envelope' ? (!isOpened ? t('点击打开信封', 'Click to open the envelope') : !isExpanded ? t('再次点击抽出信纸', 'Click again to pull out the letter') : t('点击收起信纸', 'Click to put away the letter')) : form.type === 'postcard' ? t('点击明信片翻面', 'Click to flip the postcard') : t('单面信纸', 'Single-sided letter sheet') }}</span></h3>
@@ -1398,11 +1423,63 @@ onDeactivated(() => {
 
 <style scoped>
 .editor {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
   max-width: 800px;
   margin: 0 auto;
+}
+
+.jump-to-bottom-btn {
+  position: fixed;
+  right: 22px;
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  z-index: 45;
+  display: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(12, 91, 168, 0.2);
+  border-radius: 999px;
+  background: var(--accent, #0078d4);
+  color: #fff;
+  box-shadow: 0 12px 24px rgb(15 92 170 / 22%);
+  font-size: 1.4em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.jump-to-bottom-btn.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.jump-to-bottom-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgb(15 92 170 / 28%);
+}
+
+.jump-to-bottom-btn:focus-visible {
+  outline: 2px solid var(--accent, #0078d4);
+  outline-offset: 2px;
+}
+
+@media (max-width: 820px) {
+  .jump-to-bottom-btn {
+    display: grid;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(33vh + env(safe-area-inset-bottom, 0px));
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .editor-body {
@@ -2345,12 +2422,13 @@ onDeactivated(() => {
 @media (max-width: 820px) {
   .editor {
     --mobile-titlebar-offset: 0px;
+    --bottom-bar-height: 56px;
     container-type: normal;
   }
 
   .editor.titlebar-always-bottom,
   .editor.titlebar-narrow-bottom {
-    --mobile-titlebar-offset: 112px;
+    --mobile-titlebar-offset: calc(var(--bottom-bar-height) * 2);
   }
 
   .editor-body,
@@ -2399,24 +2477,24 @@ onDeactivated(() => {
 
   .editor.titlebar-always-bottom .preview-section,
   .editor.titlebar-narrow-bottom .preview-section {
-    position: fixed;
-    z-index: 20;
-    right: 0;
-    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-    left: 0;
+    position: static;
+    z-index: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
     top: auto;
-    max-height: 36dvh;
-    overflow-y: auto;
-    padding: 10px 14px;
-    border-right: 0;
-    border-left: 0;
+    max-height: none;
+    overflow: visible;
+    padding: 10px 14px 0;
+    border-right: 1px solid var(--border);
+    border-left: 1px solid var(--border);
     background: var(--surface);
-    box-shadow: 0 -8px 24px rgb(24 27 30 / 14%);
+    box-shadow: none;
   }
 
   .editor.titlebar-always-bottom .preview-section.envelope-expanded-preview,
   .editor.titlebar-narrow-bottom .preview-section.envelope-expanded-preview {
-    position: fixed;
+    position: static;
   }
 
   .editor.titlebar-always-bottom .preview-section .preview-content,
